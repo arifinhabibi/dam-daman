@@ -42,6 +42,38 @@ namespace Pamor
             return point >= 0;
         }
 
+        /// <summary>Where a screen ray meets the board surface, in board-local space.</summary>
+        public bool TryGetBoardPoint(Ray worldRay, out Vector3 local)
+        {
+            local = default;
+            var plane = new Plane(transform.up, transform.TransformPoint(new Vector3(0, SurfaceY, 0)));
+            if (!plane.Raycast(worldRay, out float enter)) return false;
+            local = transform.InverseTransformPoint(worldRay.GetPoint(enter));
+            local.y = SurfaceY;
+            return true;
+        }
+
+        /// <summary>Carries a held piece under the finger (the piece itself stays lifted by its selection).</summary>
+        public void DragPieceTo(int p, Vector3 local)
+        {
+            var v = PieceAt(p);
+            if (v != null) v.transform.localPosition = local;
+        }
+
+        /// <summary>Slides a piece that was dragged but not dropped on a legal point back to its own point.</summary>
+        public void SnapPieceBack(int p)
+        {
+            var v = PieceAt(p);
+            if (v != null) StartCoroutine(SnapBackRoutine(v, ToLocal(p)));
+        }
+
+        IEnumerator SnapBackRoutine(PieceView v, Vector3 home)
+        {
+            Vector3 from = v.transform.localPosition;
+            yield return Ease.Tween(0.14f, t => { if (v != null) v.transform.localPosition = Vector3.LerpUnclamped(from, home, t); }, Ease.OutCubic, unscaled: false);
+            if (v != null) v.transform.localPosition = home;
+        }
+
         public void Build(Board board)
         {
             for (int i = transform.childCount - 1; i >= 0; i--) Destroy(transform.GetChild(i).gameObject);

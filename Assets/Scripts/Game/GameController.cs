@@ -95,7 +95,63 @@ namespace Pamor
         bool pressing, dragging, pinching;
         float lastPinch;
 
-        /// <summary>One finger or the mouse: tap selects, drag orbits the camera. Two fingers or the wheel: zoom.</summary>
+        // Piece drag: a press that starts on one of your movable pieces drags the piece, not the camera.
+        int pieceCandidate = -1, pieceDragFrom = -1;
+        bool pieceDragging;
+
+        /// <summary>The piece a press at this screen position would pick up, or -1 (empty point, enemy piece, nothing movable, not your turn).</summary>
+        int FindDraggablePiece(Vector2 pos)
+        {
+            if (transitioning) return -1;
+            if (!boardView.TryGetPoint(cam.ScreenPointToRay(pos), out var p)) return -1;
+            if (State == GameState.Setup) return Board.Owner(p) == setupSide ? p : -1;
+            if (State != GameState.Playing || Busy || IsAiTurn || targeting || commanderTargeting) return -1;
+            if (Board.Owner(p) != Board.ToMove) return -1;
+            return rules.LegalMovesFrom(Board, p).Count > 0 ? p : -1;
+        }
+
+        void BeginPieceDrag(int p)
+        {
+            pieceDragFrom = p;
+            pieceDragging = true;
+            if (State == GameState.Setup) { SetupDeselect(); SetupTap(p); }
+            else if (selected != p) Tap(p); // selects it and shows its destinations
+        }
+
+        void UpdatePieceDrag(Vector2 pos)
+        {
+            if (boardView.TryGetBoardPoint(cam.ScreenPointToRay(pos), out var local)) boardView.DragPieceTo(pieceDragFrom, local);
+        }
+
+        void CancelPieceDrag()
+        {
+            if (!pieceDragging) return;
+            boardView.SnapPieceBack(pieceDragFrom);
+            pieceDragging = false; pieceDragFrom = -1;
+        }
+
+        /// <summary>Dropping on a legal destination plays the move; in Fase Susun, dropping on another of your pieces swaps roles. Anything else snaps back.</summary>
+        void EndPieceDrag(Vector2 pos)
+        {
+            int from = pieceDragFrom;
+            pieceDragging = false; pieceDragFrom = -1;
+            bool hit = boardView.TryGetPoint(cam.ScreenPointToRay(pos), out var to);
+            if (State == GameState.Setup)
+            {
+                if (hit && to != from) SetupTap(to); else SetupDeselect();
+                boardView.SnapPieceBack(from);
+                return;
+            }
+            if (State == GameState.Playing && !Busy && hit && to != from && selected == from
+                && rules.LegalMovesFrom(Board, from).Any(m => m.To == to))
+            {
+                Tap(to);
+                return;
+            }
+            boardView.SnapPieceBack(from);
+        }
+
+        /// <summary>One finger or the mouse: drag one of your pieces to move it, drag elsewhere to orbit the camera, tap to select. Two fingers or the wheel: zoom.</summary>
         void HandleGestures()
         {
             if (Mouse.current != null)
@@ -112,9 +168,14 @@ namespace Pamor
                 lastPinch = dist;
                 pinching = true;
                 dragging = true; // a pinch never ends in a tap
+                pieceCandidate = -1;
+                CancelPieceDrag();
                 return;
             }
             pinching = false;
+
+            // The turn moved on (timer, AI) while a piece was held: put it back.
+            if (pieceDragging && ((State != GameState.Playing && State != GameState.Setup) || (State == GameState.Playing && Busy))) CancelPieceDrag();
 
             var pointer = Pointer.current;
             if (pointer == null) return;
@@ -126,17 +187,28 @@ namespace Pamor
                 if (es != null && es.IsPointerOverGameObject()) { pressing = false; return; }
                 pressing = true; dragging = false;
                 pressStart = lastPointer = pos;
+                pieceCandidate = FindDraggablePiece(pos);
             }
             else if (pressing && pointer.press.isPressed)
             {
                 float threshold = DragThresholdInches * (Screen.dpi > 0 ? Screen.dpi : 160f);
-                if (!dragging && (pos - pressStart).magnitude > threshold) dragging = true;
-                if (dragging && State != GameState.Paused) cameraRig.Rotate(pos - lastPointer);
+                if (!dragging && (pos - pressStart).magnitude > threshold)
+                {
+                    dragging = true;
+                    if (pieceCandidate >= 0) BeginPieceDrag(pieceCandidate);
+                }
+                if (dragging && State != GameState.Paused)
+                {
+                    if (pieceDragging) UpdatePieceDrag(pos);
+                    else cameraRig.Rotate(pos - lastPointer);
+                }
                 lastPointer = pos;
             }
             else if (pressing && pointer.press.wasReleasedThisFrame)
             {
                 pressing = false;
+                pieceCandidate = -1;
+                if (pieceDragging) { EndPieceDrag(pos); return; }
                 if (dragging || transitioning) return;
                 bool hit = boardView.TryGetPoint(cam.ScreenPointToRay(pos), out var point);
                 if (State == GameState.Setup) { if (hit) SetupTap(point); else SetupDeselect(); return; }
