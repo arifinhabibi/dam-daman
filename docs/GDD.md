@@ -86,6 +86,13 @@ Dukun bisa melindungi 2 bidak
 Wujud Asli (6): 1 Prajurit langsung naik jadi Dam
 Commander dipilih sebelum Fase Susun dan tetap sama sepanjang match. Daftar ini akan bertambah tiap update, dan jadi sumber konten jangka panjang utama.
 Prinsip pay-to-win: kemampuan Commander tidak pernah dijual. Yang bisa dibeli hanya tampilan (lihat Kosmetik).
+Latar belakang dan sinergi Commander
+• Sangkuriang (Sunda). Pemuda yang nyaris menikahi ibunya sendiri, Dayang Sumbi, lalu diberi syarat mustahil: membangun bahtera dalam semalam. Gagal, ia menendang perahunya hingga jadi Gunung Tangkuban Parahu. Temanya penghalang dan waktu yang berkejaran, cocok untuk gaya main bertahan/stalling; sinergi kuat dengan Dukun untuk mengunci area tengah papan.
+• Si Pitung (Betawi). Jawara Betawi yang merampok tuan tanah dan Kompeni untuk dibagikan ke rakyat kecil, lincah dan sulit ditangkap. Cocok untuk gaya agresif-ekonomi: mencuri Tenaga Dalam lawan lewat makan beruntun; sinergi kuat dengan Telik Sandi untuk gaya menyusup berulang.
+• Calon Arang (Bali/Jawa). Janda sakti yang ditakuti karena ilmu hitamnya, memicu wabah lewat kutukan saat dihina. Fokus kontrol tim lewat ajian yang melumpuhkan banyak bidak sekaligus; sinergi kuat dengan Dukun untuk tumpukan kutukan (Santet + Teluh Massal).
+• Jaka Tingkir (Jawa). Pemuda yang menaklukkan kerbau liar dan buaya saat menyeberangi sungai, lalu naik takhta jadi raja Pajang. Gaya frontline agresif: kebal 1 serangan lalu menerjang lurus memakan semua yang menghalangi; sinergi kuat dengan Pendekar dan Senopati untuk dorongan lini depan.
+• Sawerigading (Bugis). Pangeran pelaut dari epos La Galigo, mengarungi lautan luas dengan kapalnya mencari pinangan. Fokus mobilitas dan kontrol peta: bidak pinggir bergerak lebih jauh, bisa memindahkan bidak lintas papan; sinergi kuat untuk gaya split-push yang meregangkan pertahanan lawan.
+• Lutung Kasarung (Sunda). Pangeran terkutuk jadi lutung hitam yang diam-diam membantu Purbasari sebelum wujud aslinya terungkap. Fokus scaling akhir permainan: memperkuat perlindungan Dukun lalu membuka wujud asli dengan promosi instan; sinergi kuat dengan Prajurit yang dijaga sampai momentum siap.
 Tenaga Dalam dan Ajian
 Ajian dibayar dengan Tenaga Dalam, dan pemakaiannya tidak menghabiskan jatah gerak di giliran itu.
 • Mulai dengan 0, dapat +1 tiap giliran, +2 tiap makan bidak, maksimal 10.
@@ -128,6 +135,16 @@ Dipilih satu di Fase Susun, dilepas Patih saat Tenaga Dalam penuh (biaya 10).
 • Rawa Rontek: bidak sekutu yang mati di giliran ini hidup lagi.
 • Lembu Sekilan: semua bidak sekutu kebal 1 giliran.
 Versi pertama cukup 1 ajian per role, tanpa Ajian Pamungkas, supaya balance bisa diuji dulu.
+Detail cooldown dan jangkauan Ajian
+Ajian | Cooldown | Jangkauan | Catatan taktis
+Tameng Waja | 2 giliran | Diri sendiri | Pakai sebelum melangkah ke petak yang rawan dimakan.
+Saipi Angin | 3 giliran | Diri sendiri | Dikombinasikan dengan bonus combo (makan 3 bidak) untuk mobilitas berlapis.
+Panglimunan | 4 giliran | Diri sendiri | Dipakai saat posisi Telik Sandi sudah ketahuan, untuk reset tebak-tebakan lawan.
+Santet | 3 giliran | 1 bidak lawan, radius 3 petak | Sasar Patih atau Senopati lawan untuk membuka lini.
+Rajah Penolak | 2 giliran | Ajian lawan yang baru dipakai | Reaktif: harus dipakai di giliran yang sama atau giliran berikutnya untuk membatalkan.
+Gelar Supit Urang | 5 giliran | Prajurit dalam radius 2 petak dari Senopati | Dipakai untuk breakthrough saat barisan lawan padat.
+Pancasona | Sekali per match | Diri sendiri (Patih) | Idealnya dipicu manual sesaat sebelum Patih benar-benar mati, bukan otomatis, supaya pemain tetap punya kendali taktis.
+Ajian Pamungkas (Gelap Ngampar, Rawa Rontek, Lembu Sekilan) tidak punya cooldown karena hanya bisa dipakai sekali per match saat Tenaga Dalam penuh (biaya 10).
 Pusaka di papan
 Satu pusaka muncul acak di petak kosong area tengah tiap 4 giliran, dan bidak yang menginjaknya mendapat bonus permanen. Tujuannya memaksa pemain rebutan wilayah tengah.
 Pusaka

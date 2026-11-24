@@ -62,6 +62,8 @@ namespace Pamor
             hud.SetupRandomPressed += RandomizeSetup;
             hud.SetupReadyPressed += ConfirmSetup;
             hud.HandoffPressed += ConfirmHandoff;
+            hud.AjianPressed += PressAjian;
+            hud.PancasonaAnswered += yes => pancasonaAnswer = yes;
             ResetMatch();
             EnterState(GameState.Title);
         }
@@ -145,6 +147,15 @@ namespace Pamor
         public void Tap(int point)
         {
             if (State != GameState.Playing || Busy || IsAiTurn) return;
+            if (targeting)
+            {
+                // Santet: the tap picks the target, or cancels.
+                targeting = false;
+                if (selected.HasValue && rules.CastTargets(Board, selected.Value).Contains(point)) { DoCast(selected.Value, point); return; }
+                hud.NudgeHint("SANTET DIBATALKAN");
+                if (selected.HasValue) Select(selected.Value, rules.LegalMoves(Board).Where(m => m.From == selected.Value).Select(m => m.To).Distinct());
+                return;
+            }
             var legal = rules.LegalMoves(Board);
 
             if (selected.HasValue)
@@ -161,16 +172,14 @@ namespace Pamor
 
             if (Board.Owner(point) == Board.ToMove)
             {
+                // Your piece: select it (even if it can't move, its ajian may still be usable).
                 var mine = legal.Where(m => m.From == point).ToList();
-                if (mine.Count > 0)
+                Select(point, mine.Select(m => m.To).Distinct());
+                if (mine.Count == 0)
                 {
-                    Select(point, mine.Select(m => m.To).Distinct());
-                    return;
+                    boardView.PieceAt(point)?.Shake();
+                    hud.NudgeHint(Board[point].FrozenTurns > 0 ? "TERKENA SANTET" : Board.ForcedPiece >= 0 ? "SAIPI ANGIN: GERAKKAN PENDEKAR" : "BIDAK INI TIDAK BISA JALAN");
                 }
-
-                Deselect();
-                boardView.PieceAt(point)?.Shake();
-                hud.NudgeHint("BIDAK INI TIDAK BISA JALAN");
                 return;
             }
 
@@ -183,13 +192,83 @@ namespace Pamor
             selected = point;
             boardView.PieceAt(point)?.SetSelected(true);
             boardView.ShowDestinations(destinations);
+            var piece = Board[point];
+            if (piece.IsDam) hud.HideAjian();
+            else hud.ShowAjian(AjianBook.For(piece.Role), rules.CastBlocker(Board, point));
         }
 
         void Deselect()
         {
             if (selected.HasValue) boardView.PieceAt(selected.Value)?.SetSelected(false);
             selected = null;
+            targeting = false;
             boardView.ClearDestinations();
+            hud.HideAjian();
+        }
+
+        // ---------- ajian
+
+        bool targeting;
+        bool? pancasonaAnswer;
+
+        void PressAjian()
+        {
+            if (State != GameState.Playing || Busy || IsAiTurn || !selected.HasValue) return;
+            int caster = selected.Value;
+            var blocker = rules.CastBlocker(Board, caster);
+            if (blocker != null) { hud.NudgeHint(blocker.ToUpperInvariant()); return; }
+            var ajian = AjianBook.For(Board[caster].Role);
+            if (AjianBook.NeedsTarget(ajian))
+            {
+                targeting = true;
+                boardView.ShowDestinations(rules.CastTargets(Board, caster));
+                hud.NudgeHint("PILIH TARGET " + AjianBook.Name(ajian).ToUpperInvariant());
+                return;
+            }
+            DoCast(caster, caster);
+        }
+
+        void DoCast(int caster, int target)
+        {
+            var result = rules.Cast(Board, caster, target);
+            Debug.Log($"[Pamor] {result.Caster}{(Mode == MatchMode.VsAi && result.Caster == AiSide ? " (AI)" : "")} ajian {AjianBook.Name(result.Ajian)} on {BoardGraph.Name(target)}");
+            StartCoroutine(PlayCast(result));
+        }
+
+        IEnumerator PlayCast(CastResult result)
+        {
+            bool wasBusy = Busy;
+            Busy = true;
+            hud.NudgeHint("AJIAN " + AjianBook.Name(result.Ajian).ToUpperInvariant() + "!");
+            hud.FlashAccent();
+            yield return boardView.PlayCast(result);
+            boardView.RefreshRoles(Board, Viewer);
+            hud.SetTenaga(Board.Tenaga(Side.Hitam), Board.Tenaga(Side.Merah));
+            Busy = wasBusy;
+            // Re-show the caster's moves: an ajian can change them (e.g. Saipi Angin, Supit Urang).
+            if (!IsAiTurn && Board.Owner(result.CasterPoint) == Board.ToMove)
+                Select(result.CasterPoint, rules.LegalMoves(Board).Where(m => m.From == result.CasterPoint).Select(m => m.To).Distinct());
+            else Deselect();
+        }
+
+        /// <summary>Before a move resolves: if it would kill a Patih whose side can afford Pancasona, that side decides.</summary>
+        IEnumerator OfferPancasona(Move move)
+        {
+            foreach (var side in new[] { Side.Hitam, Side.Merah })
+            {
+                if (!rules.CanUsePancasona(Board, side) || !rules.KillsPatih(Board, move, side)) continue;
+                bool use;
+                if (Mode == MatchMode.VsAi && side == AiSide) use = true;
+                else
+                {
+                    pancasonaAnswer = null;
+                    hud.ShowPancasonaPrompt(side, true);
+                    while (pancasonaAnswer == null) yield return null;
+                    hud.ShowPancasonaPrompt(side, false);
+                    use = pancasonaAnswer.Value;
+                }
+                if (use) { rules.UsePancasona(Board, side); Debug.Log($"[Pamor] {side} uses Pancasona"); }
+            }
         }
 
         IEnumerator PlayTurn(Move move)
@@ -198,6 +277,9 @@ namespace Pamor
             var mover = Board.ToMove;
             boardView.PieceAt(move.From)?.SetSelected(false);
             selected = null;
+            targeting = false;
+            hud.HideAjian();
+            yield return OfferPancasona(move);
             var result = rules.Apply(Board, move);
             MovesPlayed++;
             Debug.Log($"[Pamor] {mover}{(Mode == MatchMode.VsAi && mover == AiSide ? " (AI)" : "")} {move}"
@@ -208,10 +290,14 @@ namespace Pamor
                       + (result.Shield >= 0 ? $" (perisai {BoardGraph.Name(result.Shield)})" : "")
                       + (result.BonusMove ? " (combo)" : ""));
             yield return boardView.PlayMove(result);
+            if (result.PatihRevived >= 0) boardView.Build(Board); // Pancasona: the Patih reappears at its start
             boardView.RefreshRoles(Board, Viewer);
             hud.SetCounts(Board.CountPieces(Side.Hitam), Board.CountPieces(Side.Merah));
+            hud.SetTenaga(Board.Tenaga(Side.Hitam), Board.Tenaga(Side.Merah));
             bool patihFell = result.CapturedPieces.Any(p => p.Role == Role.Patih) || (result.Burned >= 0 && result.BurnedPiece.Role == Role.Patih);
-            string note = patihFell ? "PATIH GUGUR!"
+            string note = result.PatihRevived >= 0 ? "PANCASONA! PATIH HIDUP LAGI"
+                        : result.ExtraMove ? "SAIPI ANGIN: GERAK SEKALI LAGI"
+                        : patihFell ? "PATIH GUGUR!"
                         : result.Burned >= 0 ? "DIBAKAR! TIDAK MAKAN"
                         : result.SenopatiFell.Count > 0 ? "SENOPATI GUGUR: PRAJURIT TIDAK BISA MAKAN"
                         : result.BonusMove ? "COMBO! LANGKAH BONUS"
@@ -230,7 +316,7 @@ namespace Pamor
                 yield return hud.PlayEnd(EndBanner(), MovesPlayed);
                 yield break;
             }
-            if (Mode == MatchMode.LocalPvP && !result.BonusMove)
+            if (Mode == MatchMode.LocalPvP && Board.ToMove != mover)
             {
                 // Pass the phone: cover the board so the next player can't see the other army's roles.
                 pendingNote = note;
@@ -239,6 +325,9 @@ namespace Pamor
             }
             RefreshTurnHints();
             if (note != null) hud.NudgeHint(note);
+            // Saipi Angin's second move: keep the Pendekar selected for the player.
+            if (result.ExtraMove && !IsAiTurn && Board.ForcedPiece >= 0)
+                Select(Board.ForcedPiece, rules.LegalMoves(Board).Select(m => m.To).Distinct());
             if (IsAiTurn) turnRoutine = StartCoroutine(AiTurn());
         }
 
@@ -362,19 +451,25 @@ namespace Pamor
             int id = matchId;
             var snapshot = Board.Clone();
             var ai = Ai.For(AiDifficulty);
-            var task = Task.Run(() => ai.ChooseMove(snapshot));
+            var task = Task.Run(() => ai.ChooseTurn(snapshot));
             float started = Time.time;
             while (!task.IsCompleted || Time.time - started < MinAiThinkSeconds) yield return null;
             AiThinking = false;
             if (id != matchId) yield break; // the match was reset while the AI was thinking
 
-            if (task.IsFaulted || task.Result == null)
+            if (task.IsFaulted || task.Result == null || task.Result.Move == null)
             {
                 Debug.LogError("[Pamor] AI failed to choose a move: " + task.Exception);
                 Busy = false;
                 yield break;
             }
-            yield return PlayTurn(task.Result);
+            var plan = task.Result;
+            if (plan.Caster >= 0 && rules.CastBlocker(Board, plan.Caster) == null)
+            {
+                DoCast(plan.Caster, plan.Target);
+                yield return new WaitForSeconds(0.9f);
+            }
+            yield return PlayTurn(plan.Move);
         }
 
         string EndBanner()
@@ -414,6 +509,10 @@ namespace Pamor
             boardView.Build(Board);
             boardView.RefreshRoles(Board, Viewer);
             hud.SetCounts(Board.CountPieces(Side.Hitam), Board.CountPieces(Side.Merah));
+            hud.SetTenaga(0, 0);
+            hud.HideAjian();
+            hud.ShowPancasonaPrompt(Side.Hitam, false);
+            targeting = false;
             if (Mode == MatchMode.VsAi) hud.SetPlayerNames("KAMU", "AI " + AiDifficulty.ToString().ToUpperInvariant());
             else hud.SetPlayerNames("HITAM", "MERAH");
             RefreshTurnHints();

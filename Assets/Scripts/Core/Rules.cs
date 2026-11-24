@@ -34,7 +34,7 @@ namespace Pamor.Core
         {
             var moves = Captures(board);
             for (int p = 0; p < BoardGraph.PointCount; p++)
-                if (board.Owner(p) == board.ToMove)
+                if (MayAct(board, p))
                     AddSteps(board, p, moves);
             return moves;
         }
@@ -43,9 +43,159 @@ namespace Pamor.Core
         {
             var captures = new List<Move>();
             for (int p = 0; p < BoardGraph.PointCount; p++)
-                if (board.Owner(p) == board.ToMove && CanCaptureNow(board, board[p]))
+                if (MayAct(board, p) && CanCaptureNow(board, board[p]))
                     AddCaptures(board, p, captures);
             return captures;
+        }
+
+        /// <summary>The piece belongs to the side to move, isn't held by Santet, and is the Saipi Angin piece if one is forced.</summary>
+        static bool MayAct(Board board, int p) =>
+            board.Owner(p) == board.ToMove && board[p].FrozenTurns == 0 && (board.ForcedPiece < 0 || board.ForcedPiece == p);
+
+        // ---------- ajian
+
+        /// <summary>Why the piece on this point can't cast its ajian right now, or null if it can.</summary>
+        public string CastBlocker(Board board, int caster)
+        {
+            var piece = board[caster];
+            if (!piece.Exists || piece.Side != board.ToMove) return "Bukan bidakmu.";
+            if (piece.IsDam) return "Dam tidak punya ajian.";
+            if (board.CastThisTurn) return "Sudah memakai ajian giliran ini.";
+            if (board.ForcedPiece >= 0) return "Tidak bisa saat Saipi Angin.";
+            if (piece.FrozenTurns > 0) return "Bidak ini terkena Santet.";
+            var a = AjianBook.For(piece.Role);
+            if (AjianBook.IsReaction(a)) return board.PancasonaUsed(piece.Side) ? "Pancasona sudah dipakai." : "Pancasona dipakai saat Patih akan gugur: kamu akan ditanya.";
+            if (board.CooldownLeft(piece.Side, a) > 0) return $"Jeda {board.CooldownLeft(piece.Side, a)} giliran lagi.";
+            if (board.Tenaga(piece.Side) < AjianBook.Cost(a)) return $"Tenaga Dalam kurang ({board.Tenaga(piece.Side)}/{AjianBook.Cost(a)}).";
+            if (CastTargets(board, caster).Count == 0) return "Tidak ada target.";
+            return null;
+        }
+
+        /// <summary>Valid targets for the caster's ajian: the caster itself, or enemy pieces in range for Santet.</summary>
+        public List<int> CastTargets(Board board, int caster)
+        {
+            var result = new List<int>();
+            var piece = board[caster];
+            if (!piece.Exists) return result;
+            var a = AjianBook.For(piece.Role);
+            if (!AjianBook.NeedsTarget(a)) { result.Add(caster); return result; }
+            foreach (var p in WithinSteps(caster, AjianBook.SantetRange))
+            {
+                var t = board[p];
+                if (t.Exists && t.Side != piece.Side && t.HiddenTurns == 0) result.Add(p);
+            }
+            return result;
+        }
+
+        static IEnumerable<int> WithinSteps(int from, int steps)
+        {
+            var dist = new Dictionary<int, int> { { from, 0 } };
+            var queue = new Queue<int>();
+            queue.Enqueue(from);
+            while (queue.Count > 0)
+            {
+                int p = queue.Dequeue();
+                if (dist[p] == steps) continue;
+                foreach (var ray in BoardGraph.Rays[p])
+                    if (!dist.ContainsKey(ray[0])) { dist[ray[0]] = dist[p] + 1; queue.Enqueue(ray[0]); }
+            }
+            foreach (var kv in dist) if (kv.Key != from) yield return kv.Key;
+        }
+
+        /// <summary>Casts the caster's ajian on the target (itself for every ajian but Santet). Doesn't use up the move.</summary>
+        public CastResult Cast(Board board, int caster, int target)
+        {
+            var blocker = CastBlocker(board, caster);
+            if (blocker != null) throw new System.InvalidOperationException(blocker);
+            if (!CastTargets(board, caster).Contains(target)) throw new System.InvalidOperationException("Target tidak sah.");
+
+            var piece = board[caster];
+            var side = piece.Side;
+            var a = AjianBook.For(piece.Role);
+            var result = new CastResult { Ajian = a, Caster = side, CasterPoint = caster, Target = target };
+
+            switch (a)
+            {
+                case Ajian.TamengWaja:
+                    piece.ImmuneTurns = 1; piece.Revealed = true; board.Set(caster, piece);
+                    break;
+                case Ajian.SaipiAngin:
+                    piece.ExtraMoves = 1; piece.Revealed = true; board.Set(caster, piece);
+                    break;
+                case Ajian.Panglimunan:
+                    piece.HiddenTurns = 2; board.Set(caster, piece);
+                    break;
+                case Ajian.Santet:
+                    var victim = board[target]; victim.FrozenTurns = 2; board.Set(target, victim);
+                    piece.Revealed = true; board.Set(caster, piece);
+                    break;
+                case Ajian.GelarSupitUrang:
+                    piece.Revealed = true; board.Set(caster, piece);
+                    SupitUrang(board, caster, side, result);
+                    break;
+            }
+
+            board.SetTenaga(side, board.Tenaga(side) - AjianBook.Cost(a));
+            // +1: the casting turn's own end ticks once, so N full turns are skipped afterwards.
+            board.SetCooldown(side, a, AjianBook.CooldownTurns(a) + 1);
+            board.CastThisTurn = true;
+            return result;
+        }
+
+        // ---------- Pancasona (reaction)
+
+        /// <summary>When true, Apply uses an affordable Pancasona automatically (for AI search); otherwise the game asks.</summary>
+        public bool AutoPancasona;
+
+        /// <summary>This move would kill the given side's Patih (by capture, or by burning it).</summary>
+        public bool KillsPatih(Board board, Move move, Side patihSide)
+        {
+            foreach (var c in move.Captured) if (board[c].Role == Role.Patih && board[c].Side == patihSide && !board[c].IsDam) return true;
+            if (move.IsCapture || board.ToMove != patihSide) return false;
+            var clone = board.Clone();
+            var result = ApplyRaw(clone, move);
+            return result.Burned >= 0 && result.BurnedPiece.Role == Role.Patih;
+        }
+
+        public bool CanUsePancasona(Board board, Side side) =>
+            board.HasPatihRule(side) && !board.PancasonaUsed(side) && board.Tenaga(side) >= AjianBook.Cost(Ajian.Pancasona);
+
+        /// <summary>Spends Tenaga Dalam to arm Pancasona just before a move resolves; the Patih revives if it dies in that move.</summary>
+        public void UsePancasona(Board board, Side side)
+        {
+            if (!CanUsePancasona(board, side)) throw new System.InvalidOperationException("Pancasona tidak bisa dipakai.");
+            board.SetTenaga(side, board.Tenaga(side) - AjianBook.Cost(Ajian.Pancasona));
+            board.ArmPancasona(side);
+        }
+
+        /// <summary>Every allied Prajurit within range of the Senopati steps straight forward, most advanced first.</summary>
+        static void SupitUrang(Board board, int senopati, Side side, CastResult result)
+        {
+            var allies = new List<int>();
+            foreach (var p in WithinSteps(senopati, AjianBook.SupitUrangRange))
+            {
+                var n = board[p];
+                if (n.Exists && n.Side == side && n.Role == Role.Prajurit && !n.IsDam && n.FrozenTurns == 0) allies.Add(p);
+            }
+            allies.Sort((a, b) => ((int)side * BoardGraph.Xs[b]).CompareTo((int)side * BoardGraph.Xs[a]));
+            foreach (var p in allies)
+            {
+                var rays = BoardGraph.Rays[p];
+                for (int r = 0; r < rays.Length; r++)
+                {
+                    if (BoardGraph.RayDirs[p][r] != ((int)side, 0)) continue;
+                    int to = rays[r][0];
+                    if (!board.IsEmpty(to)) break;
+                    board.MovePiece(p, to);
+                    result.Shifts.Add((p, to));
+                    if (BoardGraph.Xs[to] == Board.PromotionX(side))
+                    {
+                        var d = board[to]; d.IsDam = true; d.Revealed = true; board.Set(to, d);
+                        result.Promoted.Add(to);
+                    }
+                    break;
+                }
+            }
         }
 
         public List<Move> LegalMovesFrom(Board board, int from)
@@ -77,8 +227,20 @@ namespace Pamor.Core
 
         static bool IsBackward(Side side, (int dx, int dy) dir) => dir.dx == -(int)side;
 
-        /// <summary>Applies a legal move with every turn-end rule: reveal, promotion, burn, demotion, shield, combo.</summary>
+        /// <summary>
+        /// Applies a legal move with every turn-end rule: reveal, promotion, burn, demotion, shield, Tenaga,
+        /// Pancasona, Saipi Angin, combo. With AutoPancasona, an affordable Pancasona is used when the move
+        /// would kill a Patih; otherwise the caller asks the player first and calls UsePancasona.
+        /// </summary>
         public MoveResult Apply(Board board, Move move)
+        {
+            if (AutoPancasona)
+                foreach (var side in new[] { Side.Hitam, Side.Merah })
+                    if (CanUsePancasona(board, side) && KillsPatih(board, move, side)) UsePancasona(board, side);
+            return ApplyRaw(board, move);
+        }
+
+        MoveResult ApplyRaw(Board board, Move move)
         {
             var mover = board.ToMove;
             var piece = board[move.From];
@@ -163,14 +325,40 @@ namespace Pamor.Core
             // A shield follows its piece only while it stays put: if the shielded piece moved, it's gone.
             if (board.Shielded(mover) == move.From) board.SetShielded(mover, -1);
 
-            bool bonus = move.Captured.Count >= ComboCaptures && !board.InBonusMove;
-            if (!bonus)
+            // Tenaga Dalam: +2 per captured piece.
+            if (move.IsCapture) board.SetTenaga(mover, board.Tenaga(mover) + AjianBook.TenagaPerCapture * move.Captured.Count);
+
+            // Pancasona: a Patih that died in this move while armed comes back at its start point.
+            foreach (var side in new[] { Side.Hitam, Side.Merah })
             {
-                // The turn ends: this side's capture block was for this turn, and the opponent's shield
-                // (which covered this turn) expires.
-                board.SetPrajuritCaptureBlocked(mover, false);
-                board.SetShielded(Board.Other(mover), -1);
+                if (!board.PancasonaArmed(side) || board.Find(side, Role.Patih) >= 0) continue;
+                int spot = board.IsEmpty(board.PatihStart(side)) ? board.PatihStart(side) : -1;
+                if (spot < 0) foreach (var p in Formation.StartPoints(side)) if (board.IsEmpty(p)) { spot = p; break; }
+                board.DisarmPancasona(side);
+                if (spot < 0) continue;
+                var patih = Piece.Of(side, Role.Patih);
+                patih.Revealed = true;
+                board.Set(spot, patih);
+                result.PatihRevived = spot;
             }
+            foreach (var side in new[] { Side.Hitam, Side.Merah }) board.DisarmPancasona(side);
+
+            bool bonus = move.Captured.Count >= ComboCaptures && !board.InBonusMove;
+
+            // Saipi Angin: the Pendekar that cast it moves once more this turn, if it still can.
+            var after = board[move.To];
+            if (!bonus && after.Exists && after.Side == mover && after.ExtraMoves > 0)
+            {
+                after.ExtraMoves--;
+                board.Set(move.To, after);
+                board.ForcedPiece = move.To;
+                if (LegalMoves(board).Count > 0) { result.ExtraMove = true; }
+                else board.ForcedPiece = -1;
+            }
+            if (result.ExtraMove) return result;
+            board.ForcedPiece = -1;
+
+            if (!bonus) EndTurn(board, mover);
             foreach (var side in result.SenopatiFell) board.SetPrajuritCaptureBlocked(side, true);
 
             if (bonus)
@@ -184,6 +372,35 @@ namespace Pamor.Core
                 board.ToMove = Board.Other(mover);
             }
             return result;
+        }
+
+        /// <summary>
+        /// The mover's turn is over: capture block and the opponent's shield expire, Tenaga Dalam grows,
+        /// cooldowns tick, and status timers run (protection counts opponent turns, Santet own turns).
+        /// </summary>
+        static void EndTurn(Board board, Side mover)
+        {
+            board.SetPrajuritCaptureBlocked(mover, false);
+            board.SetShielded(Board.Other(mover), -1);
+            board.SetTenaga(mover, board.Tenaga(mover) + AjianBook.TenagaPerTurn);
+            board.TickCooldowns(mover);
+            board.CastThisTurn = false;
+            for (int p = 0; p < BoardGraph.PointCount; p++)
+            {
+                var piece = board[p];
+                if (!piece.Exists) continue;
+                if (piece.Side == mover)
+                {
+                    if (piece.FrozenTurns > 0) piece.FrozenTurns--;
+                    piece.ExtraMoves = 0;
+                }
+                else
+                {
+                    if (piece.ImmuneTurns > 0) piece.ImmuneTurns--;
+                    if (piece.HiddenTurns > 0) piece.HiddenTurns--;
+                }
+                board.Set(p, piece);
+            }
         }
 
         static bool RevealsRole(Piece p, Move move)
@@ -242,7 +459,7 @@ namespace Pamor.Core
                 if (i >= ray.Length) continue;
                 int target = ray[i];
                 if (IsEmpty(board, target, origin)) continue;
-                if (board.Owner(target) == piece.Side || captured.Contains(target) || board.IsShielded(target)) continue;
+                if (board.Owner(target) == piece.Side || captured.Contains(target) || board.IsShielded(target) || board[target].Untouchable) continue;
 
                 for (int j = i + 1; j < ray.Length && IsEmpty(board, ray[j], origin); j++)
                 {

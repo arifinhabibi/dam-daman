@@ -110,6 +110,12 @@ namespace Pamor
             renderers = GetComponentsInChildren<Renderer>(true);
         }
 
+        /// <summary>Hides the piece's renderers (it stays active so its animations keep running).</summary>
+        public void SetVisible(bool visible)
+        {
+            foreach (var r in GetComponentsInChildren<Renderer>(true)) r.enabled = visible;
+        }
+
         public void SetDam(bool dam, bool animate)
         {
             IsDam = dam;

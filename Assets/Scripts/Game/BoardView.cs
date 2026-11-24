@@ -101,18 +101,42 @@ namespace Pamor
                 if (!piece.Exists) continue;
                 bool known = revealAll || piece.Side == viewer || piece.Revealed;
                 kv.Value.ShowRole(known ? piece.Role : Role.Prajurit);
+                // Panglimunan: an unseen Telik Sandi isn't drawn for the opponent.
+                kv.Value.SetVisible(revealAll || piece.HiddenTurns == 0 || piece.Side == viewer);
             }
-            ShowShields(board);
+            ShowShields(board, viewer);
         }
 
         Transform shieldRoot;
 
-        void ShowShields(Board board)
+        void ShowShields(Board board, Side viewer)
         {
             if (shieldRoot != null) Destroy(shieldRoot.gameObject);
             shieldRoot = new GameObject("Shields").transform;
             shieldRoot.SetParent(hintsRoot, false);
             var gold = Mats.Lit(Palette.AccentPrada, 0.6f, 0.5f, 0.6f);
+            var hex = Mats.Lit(Palette.Shadow, 0.2f);
+            var mist = Mats.Lit(Palette.SkyBounce, 0.6f, 0f, 0.5f);
+            for (int p = 0; p < BoardGraph.PointCount; p++)
+            {
+                var piece = board[p];
+                if (!piece.Exists) continue;
+                // Tameng Waja: a gold band hovering around the piece.
+                if (piece.ImmuneTurns > 0)
+                    Mats.Prim(PrimitiveType.Cylinder, shieldRoot, "Tameng " + BoardGraph.Name(p), gold, ToLocal(p) + Vector3.up * 0.45f, new Vector3(1.05f, 0.02f, 1.05f));
+                // Santet: dark stakes pinning the piece.
+                if (piece.FrozenTurns > 0)
+                    for (int i = 0; i < 3; i++)
+                    {
+                        float a = i * Mathf.PI * 2f / 3f;
+                        var stake = Mats.Prim(PrimitiveType.Cube, shieldRoot, "Santet " + BoardGraph.Name(p), hex,
+                            ToLocal(p) + new Vector3(Mathf.Cos(a) * 0.55f, 0.18f, Mathf.Sin(a) * 0.55f), new Vector3(0.07f, 0.36f, 0.07f));
+                        stake.localRotation = Quaternion.Euler(Mathf.Sin(a) * 18f, 0f, -Mathf.Cos(a) * 18f);
+                    }
+                // Panglimunan, as its owner sees it: a cool mist ring.
+                if (piece.HiddenTurns > 0 && piece.Side == viewer)
+                    Mats.Prim(PrimitiveType.Cylinder, shieldRoot, "Panglimunan " + BoardGraph.Name(p), mist, ToLocal(p) + Vector3.up * 0.02f, new Vector3(1.3f, 0.01f, 1.3f));
+            }
             foreach (var side in new[] { Side.Hitam, Side.Merah })
             {
                 int p = board.Shielded(side);
@@ -212,6 +236,24 @@ namespace Pamor
                 yield return new WaitForSeconds(feel.captureDuration);
             }
             foreach (var p in result.Demoted) PieceAt(p)?.SetDam(false, animate: true);
+        }
+
+        /// <summary>Plays an ajian: a burst on the caster (and target), and hops for pieces it moves.</summary>
+        public IEnumerator PlayCast(CastResult result)
+        {
+            Burst(ToLocal(result.CasterPoint), Palette.AccentPrada, 14);
+            if (result.Target != result.CasterPoint) Burst(ToLocal(result.Target), Palette.Shadow, 14);
+            var hops = new List<Coroutine>();
+            foreach (var (from, to) in result.Shifts)
+            {
+                if (!pieces.TryGetValue(from, out var view)) continue;
+                pieces.Remove(from);
+                pieces[to] = view;
+                hops.Add(StartCoroutine(view.Hop(ToLocal(to))));
+            }
+            foreach (var h in hops) yield return h;
+            foreach (var p in result.Promoted) PieceAt(p)?.SetDam(true, animate: true);
+            yield return new WaitForSeconds(0.2f);
         }
 
         void RemovePiece(int p, Color? sparkColor)

@@ -47,5 +47,9 @@ namespace Pamor.Core
         public List<Side> SenopatiFell = new List<Side>();
         /// <summary>The mover takes another move (combo).</summary>
         public bool BonusMove;
+        /// <summary>Saipi Angin: the same piece moves once more this turn.</summary>
+        public bool ExtraMove;
+        /// <summary>Pancasona brought the Patih back on this point, or -1.</summary>
+        public int PatihRevived = -1;
     }
 }

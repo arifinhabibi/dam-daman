@@ -33,7 +33,8 @@ namespace Pamor.Core
         {
             Depth = Math.Max(1, depth);
             BlunderChance = blunderChance;
-            this.rules = rules ?? Rules.Default;
+            // The search assumes both sides use an affordable Pancasona when their Patih is about to die.
+            this.rules = rules ?? new Rules { AutoPancasona = true };
             rng = seed.HasValue ? new Random(seed.Value) : new Random();
         }
 
@@ -52,7 +53,13 @@ namespace Pamor.Core
         {
             var moves = rules.LegalMoves(board);
             if (moves.Count == 0) return null;
-            if (moves.Count == 1) return moves[0];
+            if (moves.Count == 1)
+            {
+                var only = board.Clone();
+                rules.Apply(only, moves[0]);
+                LastScore = only.ToMove == board.ToMove ? Search(only, Depth - 1, -Win * 2, Win * 2, 1) : -Search(only, Depth - 1, -Win * 2, Win * 2, 1);
+                return moves[0];
+            }
             if (BlunderChance > 0 && rng.NextDouble() < BlunderChance) return moves[rng.Next(moves.Count)];
 
             Order(board, moves);
@@ -75,6 +82,52 @@ namespace Pamor.Core
             // Equal moves are picked at random so the AI doesn't play the same game every time.
             return bestMoves[rng.Next(bestMoves.Count)];
         }
+
+        /// <summary>A whole turn: an optional ajian (cast first; it doesn't use up the move), then the move.</summary>
+        public sealed class TurnPlan
+        {
+            public int Caster = -1;
+            public int Target = -1;
+            public Move Move;
+        }
+
+        /// <summary>
+        /// Picks a turn. Each castable ajian is tried with a shorter search; it's cast only when it beats
+        /// not casting by a clear margin. The move is then searched at full depth on the resulting board.
+        /// The search tree itself doesn't explore ajian (known gap).
+        /// </summary>
+        public TurnPlan ChooseTurn(Board board)
+        {
+            var plan = new TurnPlan();
+            var options = new List<(int caster, int target)>();
+            for (int p = 0; p < BoardGraph.PointCount; p++)
+                if (board.Owner(p) == board.ToMove && rules.CastBlocker(board, p) == null)
+                    foreach (var t in rules.CastTargets(board, p)) options.Add((p, t));
+
+            if (options.Count > 0)
+            {
+                var probe = new Ai(Math.Max(1, Depth - 2), 0, rules, rng.Next());
+                if (probe.ChooseMove(board) != null)
+                {
+                    int bar = probe.LastScore + CastMargin;
+                    foreach (var (caster, target) in options)
+                    {
+                        var trial = board.Clone();
+                        rules.Cast(trial, caster, target);
+                        if (probe.ChooseMove(trial) == null) continue;
+                        if (probe.LastScore > bar) { bar = probe.LastScore; plan.Caster = caster; plan.Target = target; }
+                    }
+                }
+            }
+
+            var final = board;
+            if (plan.Caster >= 0) { final = board.Clone(); rules.Cast(final, plan.Caster, plan.Target); }
+            plan.Move = ChooseMove(final);
+            return plan;
+        }
+
+        /// <summary>How much better (in evaluation points) casting must look before the AI spends Tenaga Dalam.</summary>
+        public static int CastMargin = 25;
 
         int Search(Board board, int depth, int alpha, int beta, int ply)
         {

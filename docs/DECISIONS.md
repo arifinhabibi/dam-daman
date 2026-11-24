@@ -43,6 +43,24 @@ Still open: how the GDD's passive-limit "outer edge collapse" maps onto this boa
 
 Still open: the exact reveal rule (proposal: a piece is revealed when it does something only its role can do, captures, or is captured; Telik Sandi stays hidden until it captures or is captured, per the GDD), and where Fase Susun may place pieces (the GDD says "3 baris awal"; proposal: the player's own 16 starting points).
 
+## Tenaga Dalam and ajian v1 (built 2026-11-24)
+
+Per the GDD (one ajian per role, no Ajian Pamungkas; Dukun gets Santet, not Rajah Penolak) and its "Detail cooldown dan jangkauan" table. Implementation choices to confirm:
+- Tenaga Dalam: 0 at start, +1 at the end of each own turn, +2 per captured piece, max 10. One ajian per turn, cast before the move; it doesn't use the move.
+- Cooldown N = the next N own turns can't cast that ajian.
+- **Tameng Waja** (Prajurit, not a Dam): immune to capture during the opponent's next turn.
+- **Saipi Angin**: the Pendekar may move twice; the second move must be that Pendekar (skipped if it has no legal move).
+- **Panglimunan**: the Telik Sandi is invisible to the opponent and can't be captured for 2 opponent turns; casting doesn't reveal it. **Not yet: "bisa lewat di antara bidak lawan"** (passing through enemy pieces).
+- **Santet**: an enemy within 3 steps along lines can't move or capture during its owner's next 2 turns.
+- **Gelar Supit Urang**: every allied Prajurit within 2 steps of the Senopati steps straight forward (along its row) if that point is free; no captures.
+- **Pancasona**: a reaction. When a move is about to kill a Patih whose side has 8 Tenaga and hasn't used it, that player is asked (the AI always says yes). If used, the Patih comes back at its starting point (or the first free own starting point). Once per match. In Lawan Teman the prompt appears on the mover's screen.
+- Casting reveals the caster's role, except Panglimunan.
+- The AI considers casting each turn (shorter search with vs without each option; casts only when clearly better). Its search assumes Pancasona is always used when affordable and doesn't look ahead at future ajian.
+
+## Commanders (pending)
+
+The GDD's six Commanders (with lore and synergies, added to GDD.md) are not built yet.
+
 ## Prototype choices not in the GDD (to confirm or replace)
 
 - AI difficulty names are Mudah / Sedang / Sulit; the GDD names them **Prajurit / Senopati / Patih**.

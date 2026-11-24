@@ -59,6 +59,39 @@ namespace Pamor.Tests
         }
 
         [Test]
+        public void ChooseTurn_WithFullTenaga_AlwaysPlansALegalCastAndMove()
+        {
+            var rules = new Rules { AutoPancasona = true };
+            var b = Board.CreateStandard();
+            var ai = new Ai(2, seed: 4);
+            int casts = 0;
+            for (int turn = 0; turn < 24 && rules.Winner(b) == null; turn++)
+            {
+                b.SetTenaga(b.ToMove, AjianBook.MaxTenaga);
+                var plan = ai.ChooseTurn(b);
+                if (plan.Caster >= 0)
+                {
+                    Assert.IsNull(rules.CastBlocker(b, plan.Caster), $"turn {turn}");
+                    CollectionAssert.Contains(rules.CastTargets(b, plan.Caster), plan.Target);
+                    rules.Cast(b, plan.Caster, plan.Target);
+                    casts++;
+                }
+                CollectionAssert.Contains(rules.LegalMoves(b).Select(m => m.ToString()).ToList(), plan.Move.ToString(), $"turn {turn}");
+                rules.Apply(b, plan.Move);
+            }
+            Assert.Greater(casts, 0, "with full Tenaga Dalam the AI should find some ajian worth casting");
+        }
+
+        [Test]
+        public void ChooseTurn_WithNoTenaga_JustMoves()
+        {
+            var b = Board.CreateStandard();
+            var plan = new Ai(2, seed: 1).ChooseTurn(b);
+            Assert.AreEqual(-1, plan.Caster);
+            Assert.IsNotNull(plan.Move);
+        }
+
+        [Test]
         public void DeeperSearch_BeatsShallower_FromBothSeats()
         {
             // Regression guard: deeper search must play better. A misleading evaluation term or a
@@ -103,7 +136,8 @@ namespace Pamor.Tests
 
         static Side? Play(Ai hitam, Ai merah, int maxMoves)
         {
-            var rules = Rules.Default;
+            // Same Pancasona rule the AI's search assumes (and the game applies for an AI's own Patih).
+            var rules = new Rules { AutoPancasona = true };
             var b = Board.CreateStandard();
             for (int i = 0; i < maxMoves; i++)
             {

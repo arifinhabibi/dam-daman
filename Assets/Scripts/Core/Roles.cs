@@ -18,6 +18,16 @@ namespace Pamor.Core
         public bool Revealed;
         /// <summary>Own turns in a row this Dam has gone without capturing.</summary>
         public int DamIdle;
+        /// <summary>Tameng Waja: opponent turns left during which this piece can't be captured.</summary>
+        public int ImmuneTurns;
+        /// <summary>Panglimunan: opponent turns left during which this piece is unseen and can't be captured.</summary>
+        public int HiddenTurns;
+        /// <summary>Santet: own turns left during which this piece can't move or capture.</summary>
+        public int FrozenTurns;
+        /// <summary>Saipi Angin: extra moves this piece may still make this turn.</summary>
+        public int ExtraMoves;
+
+        public bool Untouchable => ImmuneTurns > 0 || HiddenTurns > 0;
 
         public static Piece Of(Side side, Role role, bool dam = false) =>
             new Piece { Exists = true, Side = side, Role = role, IsDam = dam };

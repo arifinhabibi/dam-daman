@@ -18,10 +18,14 @@ namespace Pamor
         public event Action ResumePressed, RestartPressed, TitlePressed, PausePressed;
         public event Action PlayLocalPressed, PlayAiPressed, DifficultyPressed;
         public event Action SetupRandomPressed, SetupReadyPressed, HandoffPressed;
+        public event Action AjianPressed;
+        public event Action<bool> PancasonaAnswered;
 
         RectTransform root;
         GameObject hud, title, pause, ended, setup, handoff;
         TextMeshProUGUI setupTitle, setupHint, handoffTitle, handoffButtonLabel, roleInfo;
+        TextMeshProUGUI hitamTenaga, merahTenaga, ajianTitle, ajianDesc, ajianStatus, pancasonaText;
+        GameObject ajianPanel, ajianButton, pancasonaPrompt;
         TextMeshProUGUI turnText, hintText, hitamCount, merahCount, hitamName, merahName, endedBanner, endedStats, difficultyLabel;
         Image turnDisc, fade, flash;
         RectTransform endedBannerRect, hintPanel;
@@ -59,14 +63,34 @@ namespace Pamor
             hintText.characterSpacing = 6;
             hintPanel.parent.gameObject.SetActive(false);
 
-            var left = FramedPanel(hud.transform, "Hitam Info", new Vector2(0f, 0.5f), new Vector2(170, 0), new Vector2(240, 160));
+            var left = FramedPanel(hud.transform, "Hitam Info", new Vector2(0f, 0.5f), new Vector2(170, 0), new Vector2(240, 210));
+            hitamTenaga = Text(left, "Tenaga", "TENAGA 0/10", 26, Palette.Kelir, new Vector2(0.5f, 0f), new Vector2(0, 22), new Vector2(220, 36));
             hitamName = Text(left, "Name", "HITAM", 34, Palette.Kelir, new Vector2(0.5f, 1f), new Vector2(0, -40), new Vector2(220, 50));
             hitamName.characterSpacing = 6;
-            hitamCount = Text(left, "Count", "12", 64, Palette.AccentPrada, new Vector2(0.5f, 0f), new Vector2(0, 50), new Vector2(220, 80));
-            var right = FramedPanel(hud.transform, "Merah Info", new Vector2(1f, 0.5f), new Vector2(-170, 0), new Vector2(240, 160));
+            hitamCount = Text(left, "Count", "12", 64, Palette.AccentPrada, new Vector2(0.5f, 0f), new Vector2(0, 90), new Vector2(220, 80));
+            var right = FramedPanel(hud.transform, "Merah Info", new Vector2(1f, 0.5f), new Vector2(-170, 0), new Vector2(240, 210));
+            merahTenaga = Text(right, "Tenaga", "TENAGA 0/10", 26, Palette.Kelir, new Vector2(0.5f, 0f), new Vector2(0, 22), new Vector2(220, 36));
             merahName = Text(right, "Name", "MERAH", 34, Palette.Kelir, new Vector2(0.5f, 1f), new Vector2(0, -40), new Vector2(220, 50));
             merahName.characterSpacing = 6;
-            merahCount = Text(right, "Count", "12", 64, Palette.AccentPrada, new Vector2(0.5f, 0f), new Vector2(0, 50), new Vector2(220, 80));
+            merahCount = Text(right, "Count", "12", 64, Palette.AccentPrada, new Vector2(0.5f, 0f), new Vector2(0, 90), new Vector2(220, 80));
+
+            // Ajian panel: appears when one of your pieces is selected.
+            var ajian = FramedPanel(hud.transform, "Ajian", new Vector2(1f, 0f), new Vector2(-230, 230), new Vector2(400, 230));
+            ajianPanel = ajian.parent.gameObject;
+            ajianTitle = Text(ajian, "Title", "AJIAN", 30, Palette.AccentPrada, new Vector2(0.5f, 1f), new Vector2(0, -28), new Vector2(380, 40));
+            ajianDesc = Text(ajian, "Desc", "", 22, Palette.Kelir, new Vector2(0.5f, 1f), new Vector2(0, -88), new Vector2(370, 80));
+            ajianDesc.textWrappingMode = TextWrappingModes.Normal;
+            ajianStatus = Text(ajian, "Status", "", 20, WithAlpha(Palette.Kelir, 0.7f), new Vector2(0.5f, 0f), new Vector2(0, 92), new Vector2(370, 30));
+            ajianButton = Button(ajian, "Cast", "PAKAI AJIAN", new Vector2(0.5f, 0f), new Vector2(0, 42), new Vector2(300, 64), () => AjianPressed?.Invoke());
+            ajianButton.GetComponentInChildren<TextMeshProUGUI>().fontSize = 30;
+            ajianPanel.SetActive(false);
+
+            // Pancasona prompt: a reaction asked when the player's Patih is about to fall.
+            pancasonaPrompt = Panel(hud.transform, "Pancasona Prompt", WithAlpha(Palette.Shadow, 0.82f), Vector2.zero, Vector2.one).gameObject;
+            pancasonaText = Text(pancasonaPrompt.transform, "Text", "PATIH AKAN GUGUR!\nPAKAI PANCASONA (8 TENAGA)?", 60, Palette.AccentPrada, new Vector2(0.5f, 0.6f), Vector2.zero, new Vector2(1500, 200));
+            Button(pancasonaPrompt.transform, "Yes", "PAKAI", new Vector2(0.5f, 0.35f), new Vector2(-170, 0), new Vector2(300, 96), () => PancasonaAnswered?.Invoke(true));
+            Button(pancasonaPrompt.transform, "No", "TIDAK", new Vector2(0.5f, 0.35f), new Vector2(170, 0), new Vector2(300, 96), () => PancasonaAnswered?.Invoke(false));
+            pancasonaPrompt.SetActive(false);
 
             var pauseBtn = Button(hud.transform, "Pause Button", "II", new Vector2(1f, 1f), new Vector2(-80, -70), new Vector2(96, 96), () => PausePressed?.Invoke());
             pauseBtn.GetComponentInChildren<TextMeshProUGUI>().fontSize = 40;
@@ -186,6 +210,34 @@ namespace Pamor
         {
             hintText.text = text;
             hintPanel.parent.gameObject.SetActive(!string.IsNullOrEmpty(text));
+        }
+
+        public void SetTenaga(int hitam, int merah)
+        {
+            hitamTenaga.text = $"TENAGA {hitam}/{AjianBook.MaxTenaga}";
+            merahTenaga.text = $"TENAGA {merah}/{AjianBook.MaxTenaga}";
+        }
+
+        /// <summary>Shows the selected piece's ajian; blocker is why it can't be cast now (null = castable).</summary>
+        public void ShowAjian(Ajian a, string blocker)
+        {
+            ajianPanel.SetActive(true);
+            ajianTitle.text = $"{AjianBook.Name(a).ToUpperInvariant()} · {AjianBook.Cost(a)}";
+            ajianDesc.text = AjianBook.Description(a);
+            ajianStatus.text = blocker ?? "Siap dipakai. Tidak menghabiskan langkah.";
+            ajianButton.GetComponent<Button>().interactable = blocker == null;
+        }
+
+        public void HideAjian() => ajianPanel.SetActive(false);
+
+        /// <summary>A brief gold flash over the screen, for ajian casts.</summary>
+        public void FlashAccent() =>
+            StartCoroutine(Ease.Tween(0.25f, t => flash.color = WithAlpha(Palette.AccentPrada, Mathf.Lerp(0.35f, 0f, t)), Ease.OutCubic));
+
+        public void ShowPancasonaPrompt(Side owner, bool show)
+        {
+            pancasonaPrompt.SetActive(show);
+            if (show) pancasonaText.text = $"PATIH {SideWord(owner)} AKAN GUGUR!\nPAKAI PANCASONA (8 TENAGA)?";
         }
 
         public void SetCounts(int hitam, int merah)

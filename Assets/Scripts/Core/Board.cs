@@ -13,6 +13,28 @@ namespace Pamor.Core
         readonly bool[] patihPlaced = new bool[2];
         readonly int[] shielded = { -1, -1 };
         readonly bool[] noPrajuritCapture = new bool[2];
+        readonly int[] tenaga = new int[2];
+        readonly int[,] cooldowns = new int[2, 6];
+        readonly bool[] pancasonaArmed = new bool[2];
+        readonly bool[] pancasonaUsed = new bool[2];
+        readonly int[] patihStart = { -1, -1 };
+
+        /// <summary>The side to move has already cast an ajian this turn.</summary>
+        public bool CastThisTurn { get; internal set; }
+        /// <summary>During a Saipi Angin second move, the only piece that may move; otherwise -1.</summary>
+        public int ForcedPiece { get; internal set; } = -1;
+
+        public int Tenaga(Side side) => tenaga[I(side)];
+        public void SetTenaga(Side side, int value) => tenaga[I(side)] = System.Math.Max(0, System.Math.Min(AjianBook.MaxTenaga, value));
+        public int CooldownLeft(Side side, Ajian a) => cooldowns[I(side), (int)a];
+        internal void SetCooldown(Side side, Ajian a, int turns) => cooldowns[I(side), (int)a] = turns;
+        internal void TickCooldowns(Side side) { for (int a = 0; a < 6; a++) if (cooldowns[I(side), a] > 0) cooldowns[I(side), a]--; }
+        public bool PancasonaArmed(Side side) => pancasonaArmed[I(side)];
+        public bool PancasonaUsed(Side side) => pancasonaUsed[I(side)];
+        internal void ArmPancasona(Side side) { pancasonaArmed[I(side)] = true; pancasonaUsed[I(side)] = true; }
+        internal void DisarmPancasona(Side side) => pancasonaArmed[I(side)] = false;
+        /// <summary>Where this side's Patih started: where Pancasona brings it back.</summary>
+        public int PatihStart(Side side) => patihStart[I(side)];
 
         public Side ToMove { get; internal set; } = Side.Hitam;
         /// <summary>Turns in a row with no capture, burn or non-Dam move; drives the draw rule.</summary>
@@ -29,7 +51,7 @@ namespace Pamor.Core
         public void Place(int p, Side side, Role role = Role.Prajurit, bool dam = false)
         {
             cells[p] = Piece.Of(side, role, dam);
-            if (role == Role.Patih) patihPlaced[I(side)] = true;
+            if (role == Role.Patih) { patihPlaced[I(side)] = true; patihStart[I(side)] = p; }
         }
 
         public void PlaceDam(int p, Side side) => Place(p, side, Role.Prajurit, true);
@@ -69,11 +91,16 @@ namespace Pamor.Core
 
         public Board Clone()
         {
-            var b = new Board { ToMove = ToMove, QuietMoves = QuietMoves, InBonusMove = InBonusMove };
+            var b = new Board { ToMove = ToMove, QuietMoves = QuietMoves, InBonusMove = InBonusMove, CastThisTurn = CastThisTurn, ForcedPiece = ForcedPiece };
             Array.Copy(cells, b.cells, cells.Length);
             Array.Copy(patihPlaced, b.patihPlaced, 2);
             Array.Copy(shielded, b.shielded, 2);
             Array.Copy(noPrajuritCapture, b.noPrajuritCapture, 2);
+            Array.Copy(tenaga, b.tenaga, 2);
+            Array.Copy(cooldowns, b.cooldowns, cooldowns.Length);
+            Array.Copy(pancasonaArmed, b.pancasonaArmed, 2);
+            Array.Copy(pancasonaUsed, b.pancasonaUsed, 2);
+            Array.Copy(patihStart, b.patihStart, 2);
             return b;
         }
 
