@@ -178,6 +178,29 @@ namespace Pamor
             hud.ShowSayembara(title, body, ("SAYEMBARA LAGI", () => BeginTransition(GameState.Playing, MatchMode.Sayembara), true), ("JUDUL", () => BeginTransition(GameState.Title, MatchMode.VsAi), true));
         }
 
+        /// <summary>During a Sayembara round the roster shows all eight players' HP; otherwise just the two players.</summary>
+        void RefreshLobbyRoster()
+        {
+            if (Mode != MatchMode.Sayembara || lobby == null) { hud.SetLobbyRoster(null); hud.SetCoins(null); return; }
+            var list = new System.Collections.Generic.List<HudView.RosterEntry>();
+            foreach (var p in lobby.All.OrderBy(p => p.Alive ? 0 : 1).ThenByDescending(p => p.Hp))
+            {
+                bool inMatch = p.IsHuman || (opponent != null && p.Id == opponent.Id);
+                list.Add(new HudView.RosterEntry
+                {
+                    Name = p.IsHuman ? "KAMU" : p.Name,
+                    Subtitle = CommanderBook.Name(p.Commander),
+                    ValueText = p.Alive ? $"{Mathf.Max(0, p.Hp)}" : $"#{p.Placement}",
+                    Fill = Mathf.Max(0, p.Hp) / (float)Sayembara.StartHp,
+                    Avatar = p.IsHuman ? Palette.PieceA : (opponent != null && p.Id == opponent.Id) ? Palette.PieceB : Palette.Sogan,
+                    Highlight = inMatch,
+                    Out = !p.Alive,
+                });
+            }
+            hud.SetLobbyRoster(list);
+            hud.SetCoins(lobby.Human.Coins);
+        }
+
         // ---------- turn timer
 
         float turnTimeLeft;
@@ -186,7 +209,7 @@ namespace Pamor
         /// <summary>Sayembara: 20 seconds per turn for the human; when time runs out the autopilot moves.</summary>
         void TickTurnTimer()
         {
-            if (Mode != MatchMode.Sayembara || State != GameState.Playing || IsAiTurn || Busy) { if (Mode != MatchMode.Sayembara) hud.SetTimer(-1); return; }
+            if (Mode != MatchMode.Sayembara || State != GameState.Playing || IsAiTurn || Busy) return;
             int key = Board.Ply * 4 + (Board.InBonusMove ? 1 : 0) + (Board.ForcedPiece >= 0 ? 2 : 0);
             if (key != timedTurnKey) { timedTurnKey = key; turnTimeLeft = Sayembara.TurnSeconds; }
             turnTimeLeft -= Time.deltaTime;

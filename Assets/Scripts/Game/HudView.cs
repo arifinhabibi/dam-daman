@@ -13,7 +13,7 @@ namespace Pamor
     /// uGUI + TextMeshPro screens, built at runtime from the palette: the in-match HUD plus the
     /// Title, Pause and Ended overlays, and one fade overlay for transitions.
     /// </summary>
-    public class HudView : MonoBehaviour
+    public partial class HudView : MonoBehaviour
     {
         public event Action ResumePressed, RestartPressed, TitlePressed, PausePressed;
         public event Action PlayLocalPressed, PlayAiPressed, DifficultyPressed, PlaySayembaraPressed;
@@ -25,14 +25,14 @@ namespace Pamor
         RectTransform root;
         GameObject hud, title, pause, ended, setup, handoff;
         TextMeshProUGUI setupTitle, setupHint, handoffTitle, handoffButtonLabel, roleInfo;
-        TextMeshProUGUI hitamTenaga, merahTenaga, ajianTitle, ajianDesc, ajianStatus, pancasonaText;
+        TextMeshProUGUI ajianTitle, ajianDesc, ajianStatus, pancasonaText;
         GameObject ajianPanel, ajianButton, pancasonaPrompt;
         GameObject commanderSelect, commanderPanel, commanderButton;
         GameObject sayembara;
         RectTransform sayembaraButtons;
         TextMeshProUGUI sayembaraTitle, sayembaraBody, timerText, titleRank;
-        TextMeshProUGUI commanderSelectTitle, commanderTitle, commanderDesc, commanderStatus, hitamCommander, merahCommander;
-        TextMeshProUGUI turnText, hintText, hitamCount, merahCount, hitamName, merahName, endedBanner, endedStats, difficultyLabel;
+        TextMeshProUGUI commanderSelectTitle, commanderTitle, commanderDesc, commanderStatus;
+        TextMeshProUGUI turnText, hintText, endedBanner, endedStats, difficultyLabel;
         Image turnDisc, fade, flash;
         RectTransform endedBannerRect, hintPanel;
         Coroutine hintRoutine;
@@ -59,12 +59,7 @@ namespace Pamor
 
             // --- In-match HUD
             hud = Panel(root, "HUD", Color.clear, Vector2.zero, Vector2.one).gameObject;
-            var turnPanel = FramedPanel(hud.transform, "Turn", new Vector2(0.5f, 1f), new Vector2(0, -70), new Vector2(520, 96));
-            turnDisc = Img(turnPanel, "Disc", Palette.PieceA, new Vector2(0f, 0.5f), new Vector2(64, 0), new Vector2(54, 54));
-            turnDisc.sprite = MakeCircleSprite();
-            turnText = Text(turnPanel, "Label", "GILIRAN HITAM", 40, Palette.Kelir, new Vector2(0.5f, 0.5f), new Vector2(30, 0), new Vector2(400, 80));
-            turnText.characterSpacing = 6;
-            timerText = Text(turnPanel, "Timer", "", 40, Palette.AccentPrada, new Vector2(1f, 0.5f), new Vector2(-40, 0), new Vector2(70, 70));
+            BuildMatchHud(hud.transform);
             hintPanel = FramedPanel(hud.transform, "Hint", new Vector2(0.5f, 0f), new Vector2(0, 62), new Vector2(620, 76));
             hintText = Text(hintPanel, "Label", "", 34, Palette.AccentPrada, new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(600, 70));
             hintText.characterSpacing = 4;
@@ -72,21 +67,8 @@ namespace Pamor
             hintText.fontSizeMin = 18; hintText.fontSizeMax = 34;
             hintPanel.parent.gameObject.SetActive(false);
 
-            var left = FramedPanel(hud.transform, "Hitam Info", new Vector2(0f, 0.64f), new Vector2(170, 0), new Vector2(240, 210));
-            hitamTenaga = Text(left, "Tenaga", "TENAGA 0/10", 26, Palette.Kelir, new Vector2(0.5f, 0f), new Vector2(0, 22), new Vector2(220, 36));
-            hitamName = Text(left, "Name", "HITAM", 34, Palette.Kelir, new Vector2(0.5f, 1f), new Vector2(0, -34), new Vector2(220, 50));
-            hitamName.characterSpacing = 6;
-            hitamCommander = Text(left, "Commander", "", 20, Palette.AccentPrada, new Vector2(0.5f, 1f), new Vector2(0, -66), new Vector2(220, 28));
-            hitamCount = Text(left, "Count", "12", 64, Palette.AccentPrada, new Vector2(0.5f, 0f), new Vector2(0, 90), new Vector2(220, 80));
-            var right = FramedPanel(hud.transform, "Merah Info", new Vector2(1f, 0.64f), new Vector2(-170, 0), new Vector2(240, 210));
-            merahTenaga = Text(right, "Tenaga", "TENAGA 0/10", 26, Palette.Kelir, new Vector2(0.5f, 0f), new Vector2(0, 22), new Vector2(220, 36));
-            merahName = Text(right, "Name", "MERAH", 34, Palette.Kelir, new Vector2(0.5f, 1f), new Vector2(0, -34), new Vector2(220, 50));
-            merahName.characterSpacing = 6;
-            merahCommander = Text(right, "Commander", "", 20, Palette.AccentPrada, new Vector2(0.5f, 1f), new Vector2(0, -66), new Vector2(220, 28));
-            merahCount = Text(right, "Count", "12", 64, Palette.AccentPrada, new Vector2(0.5f, 0f), new Vector2(0, 90), new Vector2(220, 80));
-
-            // Ajian panel: appears when one of your pieces is selected.
-            var ajian = FramedPanel(hud.transform, "Ajian", new Vector2(1f, 0f), new Vector2(-230, 150), new Vector2(400, 230));
+            // Ajian panel: appears above the Commander button when one of your pieces is selected.
+            var ajian = FramedPanel(hud.transform, "Ajian", new Vector2(1f, 0f), new Vector2(-470, 150), new Vector2(400, 230));
             ajianPanel = ajian.parent.gameObject;
             ajianTitle = Text(ajian, "Title", "AJIAN", 30, Palette.AccentPrada, new Vector2(0.5f, 1f), new Vector2(0, -28), new Vector2(380, 40));
             ajianDesc = Text(ajian, "Desc", "", 22, Palette.Kelir, new Vector2(0.5f, 1f), new Vector2(0, -88), new Vector2(370, 80));
@@ -96,26 +78,12 @@ namespace Pamor
             ajianButton.GetComponentInChildren<TextMeshProUGUI>().fontSize = 30;
             ajianPanel.SetActive(false);
 
-            // Commander active panel: bottom-left, during your own turn.
-            var cmd = FramedPanel(hud.transform, "Commander", new Vector2(0f, 0f), new Vector2(230, 150), new Vector2(400, 230));
-            commanderPanel = cmd.parent.gameObject;
-            commanderTitle = Text(cmd, "Title", "", 26, Palette.AccentPrada, new Vector2(0.5f, 1f), new Vector2(0, -26), new Vector2(380, 40));
-            commanderDesc = Text(cmd, "Desc", "", 20, Palette.Kelir, new Vector2(0.5f, 1f), new Vector2(0, -86), new Vector2(370, 80));
-            commanderDesc.textWrappingMode = TextWrappingModes.Normal;
-            commanderStatus = Text(cmd, "Status", "", 20, WithAlpha(Palette.Kelir, 0.7f), new Vector2(0.5f, 0f), new Vector2(0, 92), new Vector2(370, 30));
-            commanderButton = Button(cmd, "Use", "PAKAI", new Vector2(0.5f, 0f), new Vector2(0, 42), new Vector2(300, 64), () => CommanderPressed?.Invoke());
-            commanderButton.GetComponentInChildren<TextMeshProUGUI>().fontSize = 30;
-            commanderPanel.SetActive(false);
-
             // Pancasona prompt: a reaction asked when the player's Patih is about to fall.
             pancasonaPrompt = Panel(hud.transform, "Pancasona Prompt", WithAlpha(Palette.Shadow, 0.82f), Vector2.zero, Vector2.one).gameObject;
             pancasonaText = Text(pancasonaPrompt.transform, "Text", "PATIH AKAN GUGUR!\nPAKAI PANCASONA (8 TENAGA)?", 60, Palette.AccentPrada, new Vector2(0.5f, 0.6f), Vector2.zero, new Vector2(1500, 200));
             Button(pancasonaPrompt.transform, "Yes", "PAKAI", new Vector2(0.5f, 0.35f), new Vector2(-170, 0), new Vector2(300, 96), () => PancasonaAnswered?.Invoke(true));
             Button(pancasonaPrompt.transform, "No", "TIDAK", new Vector2(0.5f, 0.35f), new Vector2(170, 0), new Vector2(300, 96), () => PancasonaAnswered?.Invoke(false));
             pancasonaPrompt.SetActive(false);
-
-            var pauseBtn = Button(hud.transform, "Pause Button", "II", new Vector2(1f, 1f), new Vector2(-80, -70), new Vector2(96, 96), () => PausePressed?.Invoke());
-            pauseBtn.GetComponentInChildren<TextMeshProUGUI>().fontSize = 40;
 
             // --- Title: the live board is the backdrop
             title = Panel(root, "Title", WithAlpha(Palette.Shadow, 0.7f), Vector2.zero, Vector2.one).gameObject;
@@ -222,12 +190,6 @@ namespace Pamor
             StartCoroutine(Ease.Tween(0.25f, k => t.localScale = Vector3.one * Mathf.LerpUnclamped(1.2f, 1f, k), Ease.OutBack));
         }
 
-        public void SetPlayerNames(string hitam, string merah)
-        {
-            hitamName.text = hitam;
-            merahName.text = merah;
-        }
-
         public void ShowScreen(GameState state)
         {
             title.SetActive(state == GameState.Title);
@@ -260,34 +222,9 @@ namespace Pamor
             }
         }
 
-        /// <summary>The turn timer in the turn banner; negative hides it.</summary>
-        public void SetTimer(int seconds)
-        {
-            timerText.text = seconds < 0 ? "" : seconds.ToString();
-            timerText.color = seconds >= 0 && seconds <= 5 ? Palette.PieceB : Palette.AccentPrada;
-        }
-
         public void SetTitleRank(string text) => titleRank.text = text;
 
         public void SetCommanderSelect(Side side) => commanderSelectTitle.text = "PILIH COMMANDER · " + SideWord(side);
-
-        public void SetCommanders(Commander? hitam, Commander? merah)
-        {
-            hitamCommander.text = hitam.HasValue ? CommanderBook.Name(hitam.Value) : "";
-            merahCommander.text = merah.HasValue ? CommanderBook.Name(merah.Value) : "";
-        }
-
-        /// <summary>Shows the active player's Commander active; blocker is why it can't be used now (null = ready).</summary>
-        public void ShowCommander(Commander c, string blocker)
-        {
-            commanderPanel.SetActive(true);
-            commanderTitle.text = $"{CommanderBook.ActiveName(c).ToUpperInvariant()} · {CommanderBook.ActiveCost(c)}";
-            commanderDesc.text = CommanderBook.ActiveDescription(c);
-            commanderStatus.text = blocker ?? CommanderBook.Name(c) + " siap.";
-            commanderButton.GetComponent<Button>().interactable = blocker == null;
-        }
-
-        public void HideCommander() => commanderPanel.SetActive(false);
 
         static string SideWord(Side s) => s == Side.Hitam ? "HITAM" : "MERAH";
 
@@ -309,23 +246,10 @@ namespace Pamor
         public IEnumerator FadeOut() => Ease.Tween(0.15f, t => fade.color = WithAlpha(Palette.Shadow, t), Ease.OutCubic);
         public IEnumerator FadeIn() => Ease.Tween(0.15f, t => fade.color = WithAlpha(Palette.Shadow, 1f - t), Ease.OutCubic);
 
-        public void SetTurn(Side side, string label, string hint)
-        {
-            turnText.text = label;
-            turnDisc.color = side == Side.Hitam ? Palette.PieceA : Palette.PieceB;
-            SetHint(hint);
-        }
-
         void SetHint(string text)
         {
             hintText.text = text;
             hintPanel.parent.gameObject.SetActive(!string.IsNullOrEmpty(text));
-        }
-
-        public void SetTenaga(int hitam, int merah)
-        {
-            hitamTenaga.text = $"TENAGA {hitam}/{AjianBook.MaxTenaga}";
-            merahTenaga.text = $"TENAGA {merah}/{AjianBook.MaxTenaga}";
         }
 
         /// <summary>Shows the selected piece's ajian; blocker is why it can't be cast now (null = castable).</summary>
@@ -348,12 +272,6 @@ namespace Pamor
         {
             pancasonaPrompt.SetActive(show);
             if (show) pancasonaText.text = $"PATIH {SideWord(owner)} AKAN GUGUR!\nPAKAI PANCASONA (8 TENAGA)?";
-        }
-
-        public void SetCounts(int hitam, int merah)
-        {
-            hitamCount.text = hitam.ToString();
-            merahCount.text = merah.ToString();
         }
 
         /// <summary>Briefly pulses the hint line, e.g. when a player taps a piece that can't move.</summary>

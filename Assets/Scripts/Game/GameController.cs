@@ -263,8 +263,23 @@ namespace Pamor
             StartCoroutine(PlayCast(result));
         }
 
+        /// <summary>One short line for the battle log.</summary>
+        string LogLine(Side mover, Move move, MoveResult result)
+        {
+            string who = mover == Side.Hitam ? "<color=#D9A441>H</color>" : "<color=#C0553F>M</color>";
+            string line = $"{who} {move}";
+            if (result.CapturedPieces.Count > 0) line += " makan " + string.Join(", ", result.CapturedPieces.Select(p => p.IsDam ? "Dam" : RoleWord(p.Role)));
+            if (result.Burned >= 0) line += " · dibakar";
+            if (result.Promoted) line += " · jadi Dam";
+            if (result.PatihRevived >= 0) line += " · Pancasona";
+            return line;
+        }
+
+        static string RoleWord(Role r) => r == Role.TelikSandi ? "Telik Sandi" : r.ToString();
+
         IEnumerator PlayCast(CastResult result)
         {
+            hud.AddLog($"{(result.Caster == Side.Hitam ? "<color=#D9A441>H</color>" : "<color=#C0553F>M</color>")} ajian {AjianBook.Name(result.Ajian)}");
             bool wasBusy = Busy;
             Busy = true;
             hud.NudgeHint("AJIAN " + AjianBook.Name(result.Ajian).ToUpperInvariant() + "!");
@@ -297,7 +312,13 @@ namespace Pamor
         {
             if (State != GameState.Playing || Busy || IsAiTurn) return;
             var blocker = rules.CommanderBlocker(Board);
-            if (blocker != null) { hud.NudgeHint(blocker.ToUpperInvariant()); return; }
+            var c0 = Board.CommanderOf(Board.ToMove);
+            if (blocker != null)
+            {
+                // The round button has no room for text: explain the active and why it's not ready.
+                hud.NudgeHint(c0.HasValue ? $"{CommanderBook.ActiveName(c0.Value).ToUpperInvariant()}: {blocker.ToUpperInvariant()}" : blocker.ToUpperInvariant());
+                return;
+            }
             var c = Board.CommanderOf(Board.ToMove).Value;
             Deselect();
             commanderChosen.Clear();
@@ -331,6 +352,8 @@ namespace Pamor
                       + (targets.Length > 0 ? " on " + string.Join(",", targets.Select(BoardGraph.Name)) : "")
                       + (result.CapturedPieces.Count > 0 ? $" [{string.Join(",", result.CapturedPieces.Select(p => p.Role.ToString()))}]" : ""));
             hud.NudgeHint(CommanderBook.ActiveName(result.Active.Value).ToUpperInvariant() + "!");
+            hud.AddLog($"{(caster == Side.Hitam ? "<color=#D9A441>H</color>" : "<color=#C0553F>M</color>")} {CommanderBook.ActiveName(result.Active.Value)}"
+                       + (result.CapturedPieces.Count > 0 ? $" makan {result.CapturedPieces.Count}" : ""));
             hud.FlashAccent();
             yield return boardView.PlayCast(result);
             if (result.PatihRevived >= 0) boardView.Build(Board);
@@ -414,6 +437,7 @@ namespace Pamor
                       + (result.CapturedPieces.Count > 0 ? $" [{string.Join(",", result.CapturedPieces.Select(p => p.IsDam ? "Dam" : p.Role.ToString()))}]" : "")
                       + (result.Shield >= 0 ? $" (perisai {BoardGraph.Name(result.Shield)})" : "")
                       + (result.BonusMove ? " (combo)" : ""));
+            hud.AddLog(LogLine(mover, move, result));
             yield return boardView.PlayMove(result);
             if (result.PatihRevived >= 0) boardView.Build(Board); // Pancasona: the Patih reappears at its start
             boardView.RefreshRoles(Board, Viewer);
@@ -679,6 +703,10 @@ namespace Pamor
             else label = Board.ToMove == Side.Hitam ? "GILIRAN HITAM" : "GILIRAN MERAH";
             string hint = IsAiTurn ? "AI BERPIKIR..." : mustCapture ? "WAJIB MAKAN!" : "";
             hud.SetTurn(Board.ToMove, label, hint);
+            hud.SetViewer(Viewer);
+            int turnNo = Board.Ply / 2 + 1;
+            if (Mode == MatchMode.Sayembara && lobby != null) hud.SetRound($"RONDE {lobby.Round}");
+            else { hud.SetRound("GILIRAN"); hud.SetTimer(turnNo); }
             RefreshCommanderPanel();
             if (mustCapture && !IsAiTurn) boardView.ShowMustCapture(rules.Captures(Board).Select(m => m.From).Distinct());
             else boardView.ClearMustCapture();
@@ -711,6 +739,9 @@ namespace Pamor
             hud.SetTenaga(0, 0);
             hud.HideAjian();
             hud.ShowPancasonaPrompt(Side.Hitam, false);
+            hud.ClearLog();
+            hud.SetViewer(Viewer);
+            RefreshLobbyRoster();
             targeting = false;
             if (round) hud.SetPlayerNames("KAMU", opponent.Name.ToUpperInvariant());
             else if (HasAi) hud.SetPlayerNames("KAMU", "AI " + AiDifficulty.ToString().ToUpperInvariant());
