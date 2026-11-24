@@ -23,6 +23,16 @@ Researched from Indonesian sources on dam-daman / dham-dhaman (16 pieces each, a
 
 Still open: how the GDD's passive-limit "outer edge collapse" maps onto this board; role counts for 16 pieces (the GDD splits 12); "diagonal" role moves become "along a line" (e.g. Senopati: up to 2 points along a line).
 
+## Roles on the line board (confirmed 2026-11-24)
+
+- **Counts for 16 pieces:** Prajurit 10, Pendekar 2, Telik Sandi 1, Dukun 1, Senopati 1, Patih 1 (the GDD's 12 plus 4 Prajurit).
+- **"Diagonal" in the GDD's role table becomes "along a line"** on this board (e.g. Senopati: up to 2 points along a line; Patih: 1 point along any line, any direction).
+- **Capture chains go straight:** ordinary pieces keep jumping in one straight direction; only **Pendekar** (and the Dam) may turn between jumps, per the Pendekar passive.
+- **Characters:** every role gets its own placeholder 3D figure in a wayang-like silhouette (Patih: tall crown; Senopati: spear; Dukun: staff; etc.) so roles read in play; real art replaces them later.
+- **Fase Susun and hidden roles:** enemy roles are hidden (shown as Prajurit) until revealed. Local PvP uses a pass-the-phone cover screen between setups (and between turns, so each player only sees their own roles). vs AI: the AI arranges its own army.
+
+Still open: the exact reveal rule (proposal: a piece is revealed when it does something only its role can do, captures, or is captured; Telik Sandi stays hidden until it captures or is captured, per the GDD), and where Fase Susun may place pieces (the GDD says "3 baris awal"; proposal: the player's own 16 starting points).
+
 ## Prototype choices not in the GDD (to confirm or replace)
 
 - AI difficulty names are Mudah / Sedang / Sulit; the GDD names them **Prajurit / Senopati / Patih**.
