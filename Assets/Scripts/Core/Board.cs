@@ -6,51 +6,61 @@ namespace Pamor.Core
     /// <summary>The two sides. Hitam starts on the left (x 0..3) and moves toward +x; Merah moves toward -x.</summary>
     public enum Side { Hitam = 1, Merah = -1 }
 
-    /// <summary>
-    /// Board state on the <see cref="BoardGraph"/> points. Each cell holds 0 (empty), +1 Hitam man,
-    /// +2 Hitam Dam, -1 Merah man, -2 Merah Dam. Game logic lives in <see cref="Rules"/>.
-    /// </summary>
+    /// <summary>Board state on the <see cref="BoardGraph"/> points: pieces, turn and lasting effects. Game logic lives in <see cref="Rules"/>.</summary>
     public sealed class Board
     {
-        public const int Man = 1;
-        public const int Dam = 2;
-
-        readonly int[] cells = new int[BoardGraph.PointCount];
-        readonly int[] damIdle = new int[BoardGraph.PointCount];
+        readonly Piece[] cells = new Piece[BoardGraph.PointCount];
+        readonly bool[] patihPlaced = new bool[2];
+        readonly int[] shielded = { -1, -1 };
+        readonly bool[] noPrajuritCapture = new bool[2];
 
         public Side ToMove { get; internal set; } = Side.Hitam;
-        /// <summary>Turns in a row with no capture, burn or man move (only Dams shuffling); drives the draw rule.</summary>
+        /// <summary>Turns in a row with no capture, burn or non-Dam move; drives the draw rule.</summary>
         public int QuietMoves { get; internal set; }
         /// <summary>True while the side to move is taking its combo bonus move.</summary>
         public bool InBonusMove { get; internal set; }
 
-        public int this[int p]
+        static int I(Side s) => s == Side.Hitam ? 0 : 1;
+
+        public Piece this[int p] => cells[p];
+        public bool IsEmpty(int p) => !cells[p].Exists;
+        public Side? Owner(int p) => cells[p].Exists ? cells[p].Side : (Side?)null;
+
+        public void Place(int p, Side side, Role role = Role.Prajurit, bool dam = false)
         {
-            get => cells[p];
-            set { cells[p] = value; damIdle[p] = 0; }
+            cells[p] = Piece.Of(side, role, dam);
+            if (role == Role.Patih) patihPlaced[I(side)] = true;
         }
 
-        /// <summary>Own turns in a row this Dam has gone without capturing.</summary>
-        public int DamIdle(int p) => damIdle[p];
-        internal void SetDamIdle(int p, int turns) => damIdle[p] = turns;
+        public void PlaceDam(int p, Side side) => Place(p, side, Role.Prajurit, true);
+        public void Clear(int p) => cells[p] = default;
+        internal void Set(int p, Piece piece) => cells[p] = piece;
 
         internal void MovePiece(int from, int to)
         {
             if (from == to) return;
-            cells[to] = cells[from]; damIdle[to] = damIdle[from];
-            cells[from] = 0; damIdle[from] = 0;
+            cells[to] = cells[from];
+            cells[from] = default;
         }
 
-        /// <summary>16 pieces each: own triangle plus the two nearest columns of the square; centre column empty.</summary>
-        public static Board CreateStandard()
+        /// <summary>The point the side's Dukun shields during the opponent's turn, or -1.</summary>
+        public int Shielded(Side side) => shielded[I(side)];
+        internal void SetShielded(Side side, int p) => shielded[I(side)] = p;
+        public bool IsShielded(int p) => cells[p].Exists && shielded[I(cells[p].Side)] == p;
+
+        /// <summary>The side's Prajurit can't capture this turn (its Senopati died last turn).</summary>
+        public bool PrajuritCaptureBlocked(Side side) => noPrajuritCapture[I(side)];
+        internal void SetPrajuritCaptureBlocked(Side side, bool blocked) => noPrajuritCapture[I(side)] = blocked;
+
+        /// <summary>Whether this side plays with a Patih (losing it loses the game).</summary>
+        public bool HasPatihRule(Side side) => patihPlaced[I(side)];
+
+        /// <summary>16 pieces each in the given arrangements (the default arrangement when null).</summary>
+        public static Board CreateStandard(Formation hitam = null, Formation merah = null)
         {
             var b = new Board();
-            foreach (var p in AllPoints())
-            {
-                int x = BoardGraph.Xs[p];
-                if (x <= 3) b[p] = Man;
-                else if (x >= 5) b[p] = -Man;
-            }
+            foreach (var kv in (hitam ?? Formation.Default(Side.Hitam)).Roles) b.Place(kv.Key, Side.Hitam, kv.Value);
+            foreach (var kv in (merah ?? Formation.Default(Side.Merah)).Roles) b.Place(kv.Key, Side.Merah, kv.Value);
             return b;
         }
 
@@ -61,23 +71,29 @@ namespace Pamor.Core
         {
             var b = new Board { ToMove = ToMove, QuietMoves = QuietMoves, InBonusMove = InBonusMove };
             Array.Copy(cells, b.cells, cells.Length);
-            Array.Copy(damIdle, b.damIdle, damIdle.Length);
+            Array.Copy(patihPlaced, b.patihPlaced, 2);
+            Array.Copy(shielded, b.shielded, 2);
+            Array.Copy(noPrajuritCapture, b.noPrajuritCapture, 2);
             return b;
         }
 
-        public static Side? Owner(int piece) => piece > 0 ? Side.Hitam : piece < 0 ? Side.Merah : (Side?)null;
-        public static bool IsDam(int piece) => Math.Abs(piece) == Dam;
         public static Side Other(Side s) => s == Side.Hitam ? Side.Merah : Side.Hitam;
 
-        /// <summary>The column a side's men promote on: the outer edge of the opponent's triangle.</summary>
+        /// <summary>The column a side's Prajurit promote on: the outer edge of the opponent's triangle.</summary>
         public static int PromotionX(Side side) => side == Side.Hitam ? BoardGraph.Width - 1 : 0;
 
         public int CountPieces(Side side)
         {
             int n = 0;
-            for (int p = 0; p < cells.Length; p++)
-                if (Owner(cells[p]) == side) n++;
+            foreach (var c in cells) if (c.Exists && c.Side == side) n++;
             return n;
+        }
+
+        public int Find(Side side, Role role)
+        {
+            for (int p = 0; p < cells.Length; p++)
+                if (cells[p].Exists && cells[p].Side == side && cells[p].Role == role) return p;
+            return -1;
         }
 
         public static IEnumerable<int> AllPoints()

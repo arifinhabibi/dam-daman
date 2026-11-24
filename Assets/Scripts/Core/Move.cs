@@ -31,11 +31,20 @@ namespace Pamor.Core
     {
         public Move Move;
         public Side Mover;
+        /// <summary>The captured pieces as they were, in capture order (for showing who fell).</summary>
+        public List<Piece> CapturedPieces = new List<Piece>();
         public bool Promoted;
+        /// <summary>The moving piece's role became known to the opponent this move.</summary>
+        public bool RevealedMover;
         /// <summary>The point of the piece burned for skipping a capture ("dibakar"), or -1.</summary>
         public int Burned = -1;
-        /// <summary>Points of Dams that turned back into men this turn.</summary>
+        public Piece BurnedPiece;
+        /// <summary>Points of Dams that turned back into Prajurit this turn.</summary>
         public List<int> Demoted = new List<int>();
+        /// <summary>The point a Dukun now shields for the opponent's next turn, or -1.</summary>
+        public int Shield = -1;
+        /// <summary>Sides whose Senopati fell this move (their Prajurit can't capture next turn).</summary>
+        public List<Side> SenopatiFell = new List<Side>();
         /// <summary>The mover takes another move (combo).</summary>
         public bool BonusMove;
     }

@@ -352,7 +352,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Pamor.Game::Pamor.CameraRig
   orbit: {fileID: 43567906}
   maxTiltFromTop: 40
-  startTiltFromTop: 28
+  startTiltFromTop: 36
   startYaw: 90
   radius: 21.5
   degreesPerPixel: 0.25

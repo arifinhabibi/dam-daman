@@ -10,9 +10,13 @@ namespace Pamor
     public class PieceView : MonoBehaviour
     {
         const float DiscHeight = 0.26f;
+        /// <summary>Figures are scaled up so their silhouettes read from the overhead camera.</summary>
+        const float FigureScale = 1.8f;
 
         Transform body;
         Transform crown;
+        Transform figure;
+        Color bodyColor;
         Renderer[] renderers;
         Vector3 bodyHome;
         Coroutine liftRoutine;
@@ -45,8 +49,65 @@ namespace Pamor
             Mats.Prim(PrimitiveType.Sphere, view.crown, "Crown Jewel", Mats.Lit(bodyColor, 0.9f), new Vector3(0, 0.2f, 0), Vector3.one * 0.2f);
             view.crown.localScale = Vector3.zero;
 
+            view.bodyColor = bodyColor;
             view.renderers = go.GetComponentsInChildren<Renderer>(true);
             return view;
+        }
+
+        /// <summary>Which role the viewer sees on this piece (an unrevealed enemy shows as Prajurit).</summary>
+        public Core.Role ShownRole { get; private set; } = (Core.Role)(-1);
+
+        /// <summary>
+        /// Placeholder character figure standing on the disc: a dark wayang-like silhouette with a gold
+        /// prop per role. Real character art replaces these later.
+        /// </summary>
+        public void ShowRole(Core.Role role)
+        {
+            if (role == ShownRole && figure != null) return;
+            ShownRole = role;
+            if (figure != null) Destroy(figure.gameObject);
+            figure = new GameObject("Figure " + role).transform;
+            figure.SetParent(body, false);
+            figure.localPosition = new Vector3(0, DiscHeight * 0.5f + 0.03f, 0);
+            figure.localScale = Vector3.one * FigureScale;
+
+            var dark = Mats.Lit(bodyColor, 0.55f);
+            var gold = Mats.Lit(Palette.AccentPrada, 0.75f, 0.85f);
+            bool tall = role == Core.Role.Patih || role == Core.Role.Senopati;
+            float h = tall ? 0.42f : 0.32f;
+            Mats.Prim(PrimitiveType.Cylinder, figure, "Torso", dark, new Vector3(0, h * 0.5f, 0), new Vector3(0.26f, h * 0.5f, 0.2f));
+            Mats.Prim(PrimitiveType.Sphere, figure, "Head", dark, new Vector3(0, h + 0.1f, 0), Vector3.one * 0.2f);
+
+            switch (role)
+            {
+                case Core.Role.Patih: // tall gold crown
+                    Mats.Prim(PrimitiveType.Cylinder, figure, "Crown", gold, new Vector3(0, h + 0.24f, 0), new Vector3(0.16f, 0.09f, 0.16f));
+                    Mats.Prim(PrimitiveType.Sphere, figure, "Crown Top", gold, new Vector3(0, h + 0.36f, 0), Vector3.one * 0.08f);
+                    break;
+                case Core.Role.Senopati: // spear
+                    Mats.Prim(PrimitiveType.Cylinder, figure, "Spear", gold, new Vector3(0.2f, h * 0.65f, 0), new Vector3(0.035f, h * 0.65f, 0.035f));
+                    Mats.Prim(PrimitiveType.Cube, figure, "Spear Tip", gold, new Vector3(0.2f, h * 1.33f, 0), new Vector3(0.06f, 0.12f, 0.02f));
+                    break;
+                case Core.Role.Pendekar: // two crossed blades
+                    var a = Mats.Prim(PrimitiveType.Cube, figure, "Blade L", gold, new Vector3(0, h * 0.7f, 0.13f), new Vector3(0.04f, 0.34f, 0.02f));
+                    a.localRotation = Quaternion.Euler(0, 0, 35);
+                    var b = Mats.Prim(PrimitiveType.Cube, figure, "Blade R", gold, new Vector3(0, h * 0.7f, 0.13f), new Vector3(0.04f, 0.34f, 0.02f));
+                    b.localRotation = Quaternion.Euler(0, 0, -35);
+                    break;
+                case Core.Role.Dukun: // staff with a gold head
+                    Mats.Prim(PrimitiveType.Cylinder, figure, "Staff", Mats.Lit(Palette.Sogan, 0.4f), new Vector3(-0.19f, h * 0.6f, 0), new Vector3(0.03f, h * 0.6f, 0.03f));
+                    Mats.Prim(PrimitiveType.Sphere, figure, "Staff Head", gold, new Vector3(-0.19f, h * 1.22f, 0), Vector3.one * 0.08f);
+                    break;
+                case Core.Role.TelikSandi: // hooded: a hood over the head and a gold mask band
+                    Mats.Prim(PrimitiveType.Sphere, figure, "Hood", Mats.Lit(Palette.Sogan, 0.3f), new Vector3(0, h + 0.13f, -0.02f), new Vector3(0.25f, 0.22f, 0.25f));
+                    Mats.Prim(PrimitiveType.Cube, figure, "Mask", gold, new Vector3(0, h + 0.1f, 0.09f), new Vector3(0.16f, 0.04f, 0.04f));
+                    break;
+                default: // Prajurit: small gold shield
+                    Mats.Prim(PrimitiveType.Cylinder, figure, "Shield", gold, new Vector3(0.15f, h * 0.55f, 0), new Vector3(0.14f, 0.015f, 0.14f)).localRotation = Quaternion.Euler(0, 0, 90);
+                    break;
+            }
+            crown.localPosition = new Vector3(0, DiscHeight * 0.5f + (h + 0.25f) * FigureScale, 0);
+            renderers = GetComponentsInChildren<Renderer>(true);
         }
 
         public void SetDam(bool dam, bool animate)

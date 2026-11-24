@@ -3,24 +3,25 @@ using System.Collections.Generic;
 namespace Pamor.Core
 {
     /// <summary>
-    /// Pamor base rules on the dam-daman line board (docs/DECISIONS.md, "Board rules"; docs/GDD.md, "Aturan dasar").
-    /// - Men step one point along a line: forward, forward-diagonal or sideways, never backward.
-    /// - Men capture by jumping an adjacent enemy along a line to the empty point beyond, in the same
-    ///   directions. Capture chains are completed: the piece keeps jumping while it can.
-    /// - Capturing is not forced, but skipping it is punished: if a capture was available and the move
-    ///   wasn't one, the piece that could have captured is burned ("dibakar"). With several, the one
-    ///   with the biggest capture burns.
-    /// - A man that ends its move on the outer edge of the enemy triangle becomes a Dam, which flies any
-    ///   distance along a line and captures that way. A Dam that goes DamIdleLimit of its owner's turns
-    ///   without capturing turns back into a man.
-    /// - Capturing ComboCaptures or more pieces in one move earns one bonus move.
-    /// - A side with no pieces, or no legal move on its turn, loses.
-    /// - Draw after DrawQuietMoveLimit turns with only Dams moving and nothing captured or burned.
-    /// Not yet: Patih and roles, the passive-limit edge collapse.
+    /// Pamor rules on the dam-daman line board (docs/DECISIONS.md; docs/GDD.md "Aturan dasar" and "Role bidak").
+    /// Movement by role (along lines; "backward" = toward the piece's own side):
+    /// - Prajurit, Telik Sandi, Dukun: 1 point forward, forward-diagonal or sideways.
+    /// - Senopati: up to 2 points in those directions (the path must be clear).
+    /// - Pendekar, Patih: 1 point in any direction.  Dam (promoted Prajurit): any distance, any direction.
+    /// Capture: jump an adjacent enemy along a line to the empty point beyond, in the piece's directions
+    /// (a Dam may jump from a distance). Chains are completed and go straight; only Pendekar and Dam may
+    /// turn between jumps. Dukun never captures. A piece the enemy Dukun shields can't be captured.
+    /// Skipping an available capture burns the piece that could have captured ("dibakar").
+    /// Prajurit promote to Dam on the enemy triangle tip; a Dam idle for DamIdleLimit own turns turns back.
+    /// When a Senopati falls, its side's Prajurit can't capture on their next turn.
+    /// A Dukun that moves shields its most important neighbour during the opponent's next turn.
+    /// Capturing ComboCaptures or more earns one bonus move.
+    /// Losing the Patih loses the game; so does having no pieces or no legal move. Draw after
+    /// DrawQuietMoveLimit turns in which only backward-capable pieces (Dam, Pendekar, Patih) moved and
+    /// nothing was captured or burned.
     /// </summary>
     public sealed class Rules
     {
-        public bool MenCaptureBackward = false;
         public bool FlyingDam = true;
         public int DamIdleLimit = 3;
         public int ComboCaptures = 3;
@@ -33,7 +34,7 @@ namespace Pamor.Core
         {
             var moves = Captures(board);
             for (int p = 0; p < BoardGraph.PointCount; p++)
-                if (Board.Owner(board[p]) == board.ToMove)
+                if (board.Owner(p) == board.ToMove)
                     AddSteps(board, p, moves);
             return moves;
         }
@@ -42,7 +43,7 @@ namespace Pamor.Core
         {
             var captures = new List<Move>();
             for (int p = 0; p < BoardGraph.PointCount; p++)
-                if (Board.Owner(board[p]) == board.ToMove)
+                if (board.Owner(p) == board.ToMove && CanCaptureNow(board, board[p]))
                     AddCaptures(board, p, captures);
             return captures;
         }
@@ -62,18 +63,26 @@ namespace Pamor.Core
         /// <summary>The winner, or null while the game goes on.</summary>
         public Side? Winner(Board board)
         {
-            if (board.CountPieces(Side.Hitam) == 0) return Side.Merah;
-            if (board.CountPieces(Side.Merah) == 0) return Side.Hitam;
+            foreach (var side in new[] { Side.Hitam, Side.Merah })
+            {
+                if (board.CountPieces(side) == 0) return Board.Other(side);
+                if (board.HasPatihRule(side) && board.Find(side, Role.Patih) < 0) return Board.Other(side);
+            }
             if (LegalMoves(board).Count == 0) return Board.Other(board.ToMove);
             return null;
         }
 
-        /// <summary>Applies a legal move with every turn-end rule: burn, promotion, demotion, combo.</summary>
+        static bool CanCaptureNow(Board board, Piece p) =>
+            RoleRules.CanCapture(p) && !(p.Role == Role.Prajurit && !p.IsDam && board.PrajuritCaptureBlocked(p.Side));
+
+        static bool IsBackward(Side side, (int dx, int dy) dir) => dir.dx == -(int)side;
+
+        /// <summary>Applies a legal move with every turn-end rule: reveal, promotion, burn, demotion, shield, combo.</summary>
         public MoveResult Apply(Board board, Move move)
         {
             var mover = board.ToMove;
-            int piece = board[move.From];
-            if (Board.Owner(piece) != mover) throw new System.InvalidOperationException($"No {mover} piece on {BoardGraph.Name(move.From)}.");
+            var piece = board[move.From];
+            if (!piece.Exists || piece.Side != mover) throw new System.InvalidOperationException($"No {mover} piece on {BoardGraph.Name(move.From)}.");
             var result = new MoveResult { Move = move, Mover = mover };
 
             // Who could have captured, remembered before the move for the burn rule.
@@ -83,41 +92,88 @@ namespace Pamor.Core
                     if (bestSkipped == null || c.Captured.Count > bestSkipped.Captured.Count) bestSkipped = c;
 
             board.MovePiece(move.From, move.To);
-            foreach (var cap in move.Captured) board[cap] = 0;
-
-            if (!Board.IsDam(piece) && BoardGraph.Xs[move.To] == Board.PromotionX(mover))
+            foreach (var cap in move.Captured)
             {
-                board[move.To] = (int)mover * Board.Dam;
+                var victim = board[cap];
+                result.CapturedPieces.Add(victim);
+                if (victim.Role == Role.Senopati && !victim.IsDam) result.SenopatiFell.Add(victim.Side);
+                board.Clear(cap);
+            }
+
+            // Reveal: any capture, or a move only this role could make.
+            var moved = board[move.To];
+            if (!moved.Revealed && (move.IsCapture || RevealsRole(moved, move)))
+            {
+                moved.Revealed = true;
+                result.RevealedMover = true;
+            }
+            if (RoleRules.Promotes(moved) && BoardGraph.Xs[move.To] == Board.PromotionX(mover))
+            {
+                moved.IsDam = true;
+                moved.DamIdle = 0;
+                moved.Revealed = true;
                 result.Promoted = true;
             }
+            board.Set(move.To, moved);
 
             if (bestSkipped != null)
             {
                 int burned = bestSkipped.From == move.From ? move.To : bestSkipped.From;
-                board[burned] = 0;
+                result.BurnedPiece = board[burned];
+                if (result.BurnedPiece.Role == Role.Senopati && !result.BurnedPiece.IsDam) result.SenopatiFell.Add(mover);
+                board.Clear(burned);
                 result.Burned = burned;
             }
 
             // Dam idle counting: every Dam of the mover that didn't capture this turn ages by one turn.
             for (int p = 0; p < BoardGraph.PointCount; p++)
             {
-                if (Board.Owner(board[p]) != mover || !Board.IsDam(board[p])) continue;
-                bool capturedNow = p == move.To && move.IsCapture;
-                bool justPromoted = p == move.To && result.Promoted;
-                if (capturedNow || justPromoted) { board.SetDamIdle(p, 0); continue; }
-                int idle = board.DamIdle(p) + 1;
-                if (idle >= DamIdleLimit)
-                {
-                    board[p] = (int)mover * Board.Man;
-                    result.Demoted.Add(p);
-                }
-                else board.SetDamIdle(p, idle);
+                var d = board[p];
+                if (!d.Exists || d.Side != mover || !d.IsDam) continue;
+                if (p == move.To && (move.IsCapture || result.Promoted)) { d.DamIdle = 0; board.Set(p, d); continue; }
+                d.DamIdle++;
+                if (d.DamIdle >= DamIdleLimit) { d.IsDam = false; d.DamIdle = 0; result.Demoted.Add(p); }
+                board.Set(p, d);
             }
 
-            bool quiet = !move.IsCapture && result.Burned < 0 && Board.IsDam(piece);
+            // Only pieces that can go backward (Dam, Pendekar, Patih) can shuffle forever; a forward-only
+            // move is progress and resets the draw count, as does any capture or burn.
+            bool quiet = !move.IsCapture && result.Burned < 0 && RoleRules.MovesBackward(piece);
             board.QuietMoves = quiet ? board.QuietMoves + 1 : 0;
 
-            if (move.Captured.Count >= ComboCaptures && !board.InBonusMove)
+            // Dukun shield: a Dukun that just moved shields its most important neighbour for the opponent's turn.
+            if (board[move.To].Exists && board[move.To].Role == Role.Dukun && !board[move.To].IsDam)
+            {
+                int best = -1, bestRank = -1;
+                foreach (var ray in BoardGraph.Rays[move.To])
+                {
+                    int n = ray[0];
+                    if (board.Owner(n) != mover) continue;
+                    int rank = RoleRules.Importance(board[n]);
+                    if (rank > bestRank) { bestRank = rank; best = n; }
+                }
+                if (best >= 0)
+                {
+                    board.SetShielded(mover, best);
+                    result.Shield = best;
+                    var dukun = board[move.To];
+                    if (!dukun.Revealed) { dukun.Revealed = true; board.Set(move.To, dukun); result.RevealedMover = true; }
+                }
+            }
+            // A shield follows its piece only while it stays put: if the shielded piece moved, it's gone.
+            if (board.Shielded(mover) == move.From) board.SetShielded(mover, -1);
+
+            bool bonus = move.Captured.Count >= ComboCaptures && !board.InBonusMove;
+            if (!bonus)
+            {
+                // The turn ends: this side's capture block was for this turn, and the opponent's shield
+                // (which covered this turn) expires.
+                board.SetPrajuritCaptureBlocked(mover, false);
+                board.SetShielded(Board.Other(mover), -1);
+            }
+            foreach (var side in result.SenopatiFell) board.SetPrajuritCaptureBlocked(side, true);
+
+            if (bonus)
             {
                 board.InBonusMove = true;
                 result.BonusMove = true;
@@ -130,22 +186,31 @@ namespace Pamor.Core
             return result;
         }
 
-        bool ManMayGo(Side side, (int dx, int dy) dir) => dir.dx != -(int)side;
+        static bool RevealsRole(Piece p, Move move)
+        {
+            if (p.IsDam) return false;
+            var dir = DirOf(move.From, move.Path[1]);
+            if ((p.Role == Role.Pendekar || p.Role == Role.Patih) && IsBackward(p.Side, dir)) return true;
+            if (p.Role == Role.Senopati && !BoardGraph.AreAdjacent(move.From, move.To)) return true;
+            return false;
+        }
+
+        static (int, int) DirOf(int a, int b) =>
+            (System.Math.Sign(BoardGraph.Xs[b] - BoardGraph.Xs[a]), System.Math.Sign(BoardGraph.Ys[b] - BoardGraph.Ys[a]));
 
         void AddSteps(Board board, int from, List<Move> into)
         {
-            int piece = board[from];
-            var side = Board.Owner(piece).Value;
-            bool dam = Board.IsDam(piece);
+            var piece = board[from];
+            int range = FlyingDam || !piece.IsDam ? RoleRules.StepRange(piece) : 1;
             var rays = BoardGraph.Rays[from];
             for (int r = 0; r < rays.Length; r++)
             {
-                if (!dam && !ManMayGo(side, BoardGraph.RayDirs[from][r])) continue;
-                foreach (var to in rays[r])
+                if (!RoleRules.MovesBackward(piece) && IsBackward(piece.Side, BoardGraph.RayDirs[from][r])) continue;
+                var ray = rays[r];
+                for (int k = 0; k < ray.Length && k < range; k++)
                 {
-                    if (board[to] != 0) break;
-                    into.Add(new Move(new[] { from, to }, new int[0]));
-                    if (!(dam && FlyingDam)) break;
+                    if (!board.IsEmpty(ray[k])) break;
+                    into.Add(new Move(new[] { from, ray[k] }, new int[0]));
                 }
             }
         }
@@ -154,20 +219,21 @@ namespace Pamor.Core
         {
             var path = new List<int> { from };
             var captured = new List<int>();
-            CaptureSearch(board, board[from], from, from, path, captured, into);
+            CaptureSearch(board, board[from], from, from, (0, 0), path, captured, into);
         }
 
-        void CaptureSearch(Board board, int piece, int origin, int at, List<int> path, List<int> captured, List<Move> into)
+        void CaptureSearch(Board board, Piece piece, int origin, int at, (int, int) lastDir,
+                           List<int> path, List<int> captured, List<Move> into)
         {
-            var side = Board.Owner(piece).Value;
-            bool dam = Board.IsDam(piece);
-            bool flying = dam && FlyingDam;
+            bool flying = piece.IsDam && FlyingDam;
             bool extended = false;
             var rays = BoardGraph.Rays[at];
 
             for (int r = 0; r < rays.Length; r++)
             {
-                if (!dam && !MenCaptureBackward && !ManMayGo(side, BoardGraph.RayDirs[at][r])) continue;
+                var dir = BoardGraph.RayDirs[at][r];
+                if (!RoleRules.CapturesBackward(piece) && IsBackward(piece.Side, dir)) continue;
+                if (captured.Count > 0 && !RoleRules.ChainMayTurn(piece) && !dir.Equals(lastDir)) continue;
                 var ray = rays[r];
 
                 // First occupied point along the ray (adjacent only, unless flying).
@@ -176,14 +242,14 @@ namespace Pamor.Core
                 if (i >= ray.Length) continue;
                 int target = ray[i];
                 if (IsEmpty(board, target, origin)) continue;
-                if (Board.Owner(board[target]) == side || captured.Contains(target)) continue;
+                if (board.Owner(target) == piece.Side || captured.Contains(target) || board.IsShielded(target)) continue;
 
                 for (int j = i + 1; j < ray.Length && IsEmpty(board, ray[j], origin); j++)
                 {
                     extended = true;
                     path.Add(ray[j]);
                     captured.Add(target);
-                    CaptureSearch(board, piece, origin, ray[j], path, captured, into);
+                    CaptureSearch(board, piece, origin, ray[j], dir, path, captured, into);
                     path.RemoveAt(path.Count - 1);
                     captured.RemoveAt(captured.Count - 1);
                     if (!flying) break;
@@ -195,6 +261,6 @@ namespace Pamor.Core
         }
 
         // The moving piece has left its start point, so that point counts as empty during the chain.
-        static bool IsEmpty(Board board, int p, int origin) => p == origin || board[p] == 0;
+        static bool IsEmpty(Board board, int p, int origin) => p == origin || board.IsEmpty(p);
     }
 }

@@ -43,6 +43,9 @@ namespace Pamor
 
         bool IsAiTurn => Mode == MatchMode.VsAi && Board.ToMove == AiSide;
 
+        /// <summary>Whose eyes the board is drawn for: the player vs AI; the side to move in hotseat.</summary>
+        Side Viewer => Mode == MatchMode.VsAi ? Board.Other(AiSide) : Board.ToMove;
+
         void Start()
         {
             cam = Camera.main;
@@ -148,7 +151,7 @@ namespace Pamor
                 }
             }
 
-            if (Board.Owner(Board[point]) == Board.ToMove)
+            if (Board.Owner(point) == Board.ToMove)
             {
                 var mine = legal.Where(m => m.From == point).ToList();
                 if (mine.Count > 0)
@@ -193,11 +196,18 @@ namespace Pamor
                       + (result.Promoted ? " = Dam" : "")
                       + (result.Burned >= 0 ? $" (dibakar {BoardGraph.Name(result.Burned)})" : "")
                       + (result.Demoted.Count > 0 ? $" (turun pangkat {string.Join(",", result.Demoted.Select(BoardGraph.Name))})" : "")
+                      + (result.CapturedPieces.Count > 0 ? $" [{string.Join(",", result.CapturedPieces.Select(p => p.IsDam ? "Dam" : p.Role.ToString()))}]" : "")
+                      + (result.Shield >= 0 ? $" (perisai {BoardGraph.Name(result.Shield)})" : "")
                       + (result.BonusMove ? " (combo)" : ""));
             yield return boardView.PlayMove(result);
+            boardView.RefreshRoles(Board, Viewer);
             hud.SetCounts(Board.CountPieces(Side.Hitam), Board.CountPieces(Side.Merah));
-            string note = result.Burned >= 0 ? "DIBAKAR! TIDAK MAKAN"
+            bool patihFell = result.CapturedPieces.Any(p => p.Role == Role.Patih) || (result.Burned >= 0 && result.BurnedPiece.Role == Role.Patih);
+            string note = patihFell ? "PATIH GUGUR!"
+                        : result.Burned >= 0 ? "DIBAKAR! TIDAK MAKAN"
+                        : result.SenopatiFell.Count > 0 ? "SENOPATI GUGUR: PRAJURIT TIDAK BISA MAKAN"
                         : result.BonusMove ? "COMBO! LANGKAH BONUS"
+                        : result.Shield >= 0 ? "DUKUN MELINDUNGI"
                         : result.Demoted.Count > 0 ? "DAM TURUN PANGKAT"
                         : null;
 
@@ -266,12 +276,15 @@ namespace Pamor
             matchId++;
             Busy = false;
             AiThinking = false;
-            Board = Board.CreateStandard();
+            // Until Fase Susun lands, the player uses the default formation; the AI arranges at random.
+            var merah = Mode == MatchMode.VsAi ? Formation.Random(Side.Merah, new System.Random()) : null;
+            Board = Board.CreateStandard(null, merah);
             MovesPlayed = 0;
             Winner = null;
             IsDraw = false;
             selected = null;
             boardView.Build(Board);
+            boardView.RefreshRoles(Board, Viewer);
             hud.SetCounts(Board.CountPieces(Side.Hitam), Board.CountPieces(Side.Merah));
             if (Mode == MatchMode.VsAi) hud.SetPlayerNames("KAMU", "AI " + AiDifficulty.ToString().ToUpperInvariant());
             else hud.SetPlayerNames("HITAM", "MERAH");

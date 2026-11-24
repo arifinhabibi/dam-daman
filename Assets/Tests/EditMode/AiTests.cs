@@ -8,14 +8,14 @@ namespace Pamor.Tests
     public class AiTests
     {
         static int P(string name) => BoardGraph.Parse(name);
+        static void H(Board b, string at, Role role = Role.Prajurit) => b.Place(P(at), Side.Hitam, role);
+        static void M(Board b, string at, Role role = Role.Prajurit) => b.Place(P(at), Side.Merah, role);
 
         [Test]
         public void ReturnsNull_WhenNoLegalMove()
         {
             var b = Board.CreateEmpty(Side.Merah);
-            b[P("a1")] = -Board.Man;
-            b[P("a3")] = Board.Man;
-            b[P("a5")] = Board.Man;
+            M(b, "a1"); H(b, "a3"); H(b, "a5");
             Assert.IsNull(new Ai(3, seed: 1).ChooseMove(b));
         }
 
@@ -36,20 +36,25 @@ namespace Pamor.Tests
         public void TakesTheWinningCapture()
         {
             var b = Board.CreateEmpty(Side.Merah);
-            b[P("e3")] = -Board.Man;
-            b[P("d3")] = Board.Man; // Hitam's last piece
-            b[P("i1")] = -Board.Man;
+            M(b, "e3"); H(b, "d3"); M(b, "i1");
             Assert.AreEqual("e3xc3", new Ai(3, seed: 1).ChooseMove(b).ToString());
+        }
+
+        [Test]
+        public void KillsThePatih_OverOtherCaptures()
+        {
+            var b = Board.CreateEmpty(Side.Merah);
+            M(b, "e3"); H(b, "d3", Role.Patih);
+            M(b, "g4"); H(b, "f4");
+            H(b, "a1"); H(b, "b2"); M(b, "i5");
+            Assert.AreEqual("e3xc3", new Ai(2, seed: 1).ChooseMove(b).ToString());
         }
 
         [Test]
         public void PrefersCapturing_OverBeingBurned()
         {
             var b = Board.CreateEmpty();
-            b[P("d3")] = Board.Man;
-            b[P("e3")] = -Board.Man;
-            b[P("a1")] = Board.Man;
-            b[P("i5")] = -Board.Man;
+            H(b, "d3"); M(b, "e3"); H(b, "a1"); M(b, "i5");
             Assert.AreEqual("d3xf3", new Ai(2, seed: 1).ChooseMove(b).ToString());
         }
 

@@ -98,6 +98,12 @@ namespace Pamor.Core
 
         static (int, int) Dir(int from, int to) => (System.Math.Sign(Xs[to] - Xs[from]), System.Math.Sign(Ys[to] - Ys[from]));
 
+        public static bool AreAdjacent(int a, int b)
+        {
+            foreach (var ray in Rays[a]) if (ray[0] == b) return true;
+            return false;
+        }
+
         public static int At(int x, int y) => x >= 0 && x < Width && y >= 0 && y < Height ? idAt[x, y] : -1;
 
         /// <summary>Point name: column letter a..i (x 0..8) and row 1..5 (y 0..4), e.g. "c3" is the left apex.</summary>

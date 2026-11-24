@@ -78,14 +78,53 @@ namespace Pamor
             piecesRoot = new GameObject("Pieces").transform; piecesRoot.SetParent(transform, false);
             for (int p = 0; p < BoardGraph.PointCount; p++)
             {
-                int piece = board[p];
-                if (piece == 0) continue;
-                var side = Board.Owner(piece).Value;
-                var view = PieceView.Create(piecesRoot, side == Side.Hitam ? Palette.PieceA : Palette.PieceB, feel);
-                view.name = SideName(side) + " " + BoardGraph.Name(p);
+                var piece = board[p];
+                if (!piece.Exists) continue;
+                var view = PieceView.Create(piecesRoot, piece.Side == Side.Hitam ? Palette.PieceA : Palette.PieceB, feel);
+                view.name = SideName(piece.Side) + " " + BoardGraph.Name(p);
                 view.transform.localPosition = ToLocal(p);
-                view.SetDam(Board.IsDam(piece), animate: false);
+                view.SetDam(piece.IsDam, animate: false);
                 pieces[p] = view;
+            }
+            shieldRoot = null;
+        }
+
+        /// <summary>
+        /// Shows each piece's role as the viewer may see it: own pieces and revealed enemies show their
+        /// real role; unrevealed enemies show as Prajurit. Also places the Dukun shield markers.
+        /// </summary>
+        public void RefreshRoles(Board board, Side viewer)
+        {
+            foreach (var kv in pieces)
+            {
+                var piece = board[kv.Key];
+                if (!piece.Exists) continue;
+                bool known = piece.Side == viewer || piece.Revealed;
+                kv.Value.ShowRole(known ? piece.Role : Role.Prajurit);
+            }
+            ShowShields(board);
+        }
+
+        Transform shieldRoot;
+
+        void ShowShields(Board board)
+        {
+            if (shieldRoot != null) Destroy(shieldRoot.gameObject);
+            shieldRoot = new GameObject("Shields").transform;
+            shieldRoot.SetParent(hintsRoot, false);
+            var gold = Mats.Lit(Palette.AccentPrada, 0.6f, 0.5f, 0.6f);
+            foreach (var side in new[] { Side.Hitam, Side.Merah })
+            {
+                int p = board.Shielded(side);
+                if (p < 0) continue;
+                // A ring of four gold posts around the shielded piece.
+                for (int i = 0; i < 4; i++)
+                {
+                    float a = (i + 0.5f) * Mathf.PI * 0.5f;
+                    var post = Mats.Prim(PrimitiveType.Cylinder, shieldRoot, "Shield " + BoardGraph.Name(p), gold,
+                        ToLocal(p) + new Vector3(Mathf.Cos(a) * 0.62f, 0.22f, Mathf.Sin(a) * 0.62f), new Vector3(0.08f, 0.22f, 0.08f));
+                    post.GetComponent<Renderer>().shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                }
             }
         }
 

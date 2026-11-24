@@ -9,6 +9,7 @@ namespace Pamor.Core
     /// Computer opponent: negamax with alpha-beta pruning over <see cref="Rules"/>, with a capture
     /// extension at the horizon. Combo bonus moves keep the same side to move, so those children are
     /// searched without flipping the score. Pure C#: runs on a worker thread and in EditMode tests.
+    /// Known gap: the AI sees every role, including unrevealed enemy ones.
     /// </summary>
     public sealed class Ai
     {
@@ -113,9 +114,26 @@ namespace Pamor.Core
         static int Priority(Board board, Move m)
         {
             int p = m.Captured.Count * 10;
-            if (!Board.IsDam(board[m.From]) && BoardGraph.Xs[m.To] == Board.PromotionX(board.ToMove)) p += 5;
+            foreach (var c in m.Captured) if (board[c].Role == Role.Patih) p += 100;
+            if (RoleRules.Promotes(board[m.From]) && BoardGraph.Xs[m.To] == Board.PromotionX(board.ToMove)) p += 5;
             return p;
         }
+
+        public static int ValueOf(Piece piece)
+        {
+            if (piece.IsDam) return DamValue;
+            switch (piece.Role)
+            {
+                case Role.Patih: return PatihValue;
+                case Role.Senopati: return 180;
+                case Role.Pendekar: return 160;
+                case Role.Dukun: return 120;
+                case Role.TelikSandi: return 110;
+                default: return ManValue;
+            }
+        }
+
+        const int PatihValue = 2000;
 
         /// <summary>Static score from the point of view of the side to move.</summary>
         public static int Evaluate(Board board)
@@ -123,19 +141,18 @@ namespace Pamor.Core
             int score = 0;
             for (int p = 0; p < BoardGraph.PointCount; p++)
             {
-                int piece = board[p];
-                if (piece == 0) continue;
-                var owner = Board.Owner(piece).Value;
+                var piece = board[p];
+                if (!piece.Exists) continue;
                 int x = BoardGraph.Xs[p], y = BoardGraph.Ys[p];
-                int v;
-                if (Board.IsDam(piece)) v = DamValue - board.DamIdle(p) * DamIdlePenalty;
-                else
+                int v = ValueOf(piece);
+                if (piece.IsDam) v -= piece.DamIdle * DamIdlePenalty;
+                else if (piece.Role != Role.Patih)
                 {
-                    int advanced = owner == Side.Hitam ? x : BoardGraph.Width - 1 - x;
-                    v = ManValue + advanced * AdvanceWeight;
+                    int advanced = piece.Side == Side.Hitam ? x : BoardGraph.Width - 1 - x;
+                    v += advanced * AdvanceWeight;
                 }
-                if (x >= 3 && x <= 5 && y >= 1 && y <= 3) v += CentreBonus;
-                score += owner == board.ToMove ? v : -v;
+                if (piece.Role != Role.Patih && x >= 3 && x <= 5 && y >= 1 && y <= 3) v += CentreBonus;
+                score += piece.Side == board.ToMove ? v : -v;
             }
             return score;
         }
