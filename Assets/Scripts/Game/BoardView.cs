@@ -81,6 +81,7 @@ namespace Pamor
                 var piece = board[p];
                 if (!piece.Exists) continue;
                 var view = PieceView.Create(piecesRoot, piece.Side == Side.Hitam ? Palette.PieceA : Palette.PieceB, feel);
+                view.SetSide(piece.Side);
                 view.name = SideName(piece.Side) + " " + BoardGraph.Name(p);
                 view.transform.localPosition = ToLocal(p);
                 view.SetDam(piece.IsDam, animate: false);

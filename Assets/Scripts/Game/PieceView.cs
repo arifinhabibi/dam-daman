@@ -10,8 +10,10 @@ namespace Pamor
     public class PieceView : MonoBehaviour
     {
         const float DiscHeight = 0.26f;
-        /// <summary>Figures are scaled up so their silhouettes read from the overhead camera.</summary>
-        const float FigureScale = 1.8f;
+        /// <summary>Figure height in board units (wayang outlines are about 1 unit tall).</summary>
+        const float FigureScale = 1.55f;
+        /// <summary>How far (0..1) a figure leans back toward the overhead camera, so its silhouette isn't foreshortened.</summary>
+        const float LeanToCamera = 0.6f;
 
         Transform body;
         Transform crown;
@@ -71,48 +73,66 @@ namespace Pamor
             figure.localPosition = new Vector3(0, DiscHeight * 0.5f + 0.03f, 0);
             figure.localScale = Vector3.one * FigureScale;
 
-            var dark = Mats.Lit(bodyColor, 0.55f);
-            var gold = Mats.Lit(Palette.AccentPrada, 0.75f, 0.85f);
-            bool tall = role == Core.Role.Patih || role == Core.Role.Senopati;
-            float h = tall ? 0.42f : 0.32f;
-            Mats.Prim(PrimitiveType.Cylinder, figure, "Torso", dark, new Vector3(0, h * 0.5f, 0), new Vector3(0.26f, h * 0.5f, 0.2f));
-            Mats.Prim(PrimitiveType.Sphere, figure, "Head", dark, new Vector3(0, h + 0.1f, 0), Vector3.one * 0.2f);
-
-            switch (role)
+            // The cutout turns to face the camera (see LateUpdate); Merah figures face the other way.
+            cutout = new GameObject("Wayang").transform;
+            cutout.SetParent(figure, false);
+            float s = WayangFigures.Scale(role);
+            facing = side == Core.Side.Merah ? -1f : 1f;
+            cutout.localScale = new Vector3(s, s, s);
+            var mats = new System.Collections.Generic.Dictionary<WayangFigures.Mat, Material>
             {
-                case Core.Role.Patih: // tall gold crown
-                    Mats.Prim(PrimitiveType.Cylinder, figure, "Crown", gold, new Vector3(0, h + 0.24f, 0), new Vector3(0.16f, 0.09f, 0.16f));
-                    Mats.Prim(PrimitiveType.Sphere, figure, "Crown Top", gold, new Vector3(0, h + 0.36f, 0), Vector3.one * 0.08f);
-                    break;
-                case Core.Role.Senopati: // spear
-                    Mats.Prim(PrimitiveType.Cylinder, figure, "Spear", gold, new Vector3(0.2f, h * 0.65f, 0), new Vector3(0.035f, h * 0.65f, 0.035f));
-                    Mats.Prim(PrimitiveType.Cube, figure, "Spear Tip", gold, new Vector3(0.2f, h * 1.33f, 0), new Vector3(0.06f, 0.12f, 0.02f));
-                    break;
-                case Core.Role.Pendekar: // two crossed blades
-                    var a = Mats.Prim(PrimitiveType.Cube, figure, "Blade L", gold, new Vector3(0, h * 0.7f, 0.13f), new Vector3(0.04f, 0.34f, 0.02f));
-                    a.localRotation = Quaternion.Euler(0, 0, 35);
-                    var b = Mats.Prim(PrimitiveType.Cube, figure, "Blade R", gold, new Vector3(0, h * 0.7f, 0.13f), new Vector3(0.04f, 0.34f, 0.02f));
-                    b.localRotation = Quaternion.Euler(0, 0, -35);
-                    break;
-                case Core.Role.Dukun: // staff with a gold head
-                    Mats.Prim(PrimitiveType.Cylinder, figure, "Staff", Mats.Lit(Palette.Sogan, 0.4f), new Vector3(-0.19f, h * 0.6f, 0), new Vector3(0.03f, h * 0.6f, 0.03f));
-                    Mats.Prim(PrimitiveType.Sphere, figure, "Staff Head", gold, new Vector3(-0.19f, h * 1.22f, 0), Vector3.one * 0.08f);
-                    break;
-                case Core.Role.TelikSandi: // hooded: a hood over the head and a gold mask band
-                    Mats.Prim(PrimitiveType.Sphere, figure, "Hood", Mats.Lit(Palette.Sogan, 0.3f), new Vector3(0, h + 0.13f, -0.02f), new Vector3(0.25f, 0.22f, 0.25f));
-                    Mats.Prim(PrimitiveType.Cube, figure, "Mask", gold, new Vector3(0, h + 0.1f, 0.09f), new Vector3(0.16f, 0.04f, 0.04f));
-                    break;
-                default: // Prajurit: small gold shield
-                    Mats.Prim(PrimitiveType.Cylinder, figure, "Shield", gold, new Vector3(0.15f, h * 0.55f, 0), new Vector3(0.14f, 0.015f, 0.14f)).localRotation = Quaternion.Euler(0, 0, 90);
-                    break;
+                { WayangFigures.Mat.Body, Mats.Lit(bodyColor, 0.55f) },
+                { WayangFigures.Mat.Gold, Mats.Lit(Palette.AccentPrada, 0.75f, 0.85f) },
+                { WayangFigures.Mat.Cloth, Mats.Lit(Palette.Sogan, 0.3f) },
+                { WayangFigures.Mat.Horn, Mats.Lit(Palette.Kelir, 0.5f) },
+            };
+            foreach (var part in WayangFigures.For(role))
+            {
+                var go = new GameObject("Part");
+                go.transform.SetParent(cutout, false);
+                go.transform.localPosition = new Vector3(0f, 0f, part.Z);
+                go.AddComponent<MeshFilter>().sharedMesh = WayangMesh.Get(part.Outline);
+                var r = go.AddComponent<MeshRenderer>();
+                r.sharedMaterial = mats[part.Mat];
+                r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.On;
             }
-            crown.localPosition = new Vector3(0, DiscHeight * 0.5f + (h + 0.25f) * FigureScale, 0);
+            // Dam crown floats above the head (or the Patih's makutha).
+            crown.localPosition = new Vector3(0, DiscHeight * 0.5f + (1.08f * s) * FigureScale, 0);
             renderers = GetComponentsInChildren<Renderer>(true);
+            if (!visible) SetVisible(false);
+        }
+
+        Transform cutout;
+        float facing = 1f;
+        float swayPhase = -1f;
+        bool visible = true;
+        Core.Side side;
+
+        /// <summary>Which side the piece belongs to: decides which way its figure faces.</summary>
+        public void SetSide(Core.Side s) => side = s;
+
+        void LateUpdate()
+        {
+            if (cutout == null) return;
+            var cam = Camera.main;
+            if (cam == null) return;
+            // Billboard around the vertical axis so the flat silhouette always reads, plus a slow puppet sway.
+            var full = cutout.position - cam.transform.position;
+            var flat = new Vector3(full.x, 0f, full.z);
+            if (flat.sqrMagnitude < 1e-4f) return;
+            if (swayPhase < 0f) swayPhase = Random.value * 10f;
+            float sway = Mathf.Sin((Time.time + swayPhase) * 1.3f) * 2.5f;
+            var upright = Quaternion.LookRotation(flat);
+            var facingCamera = Quaternion.LookRotation(full);
+            cutout.rotation = Quaternion.Slerp(upright, facingCamera, LeanToCamera) * Quaternion.Euler(0f, 0f, sway);
+            float s = WayangFigures.Scale(ShownRole);
+            cutout.localScale = new Vector3(s * facing, s, s);
         }
 
         /// <summary>Hides the piece's renderers (it stays active so its animations keep running).</summary>
         public void SetVisible(bool visible)
         {
+            this.visible = visible;
             foreach (var r in GetComponentsInChildren<Renderer>(true)) r.enabled = visible;
         }
 

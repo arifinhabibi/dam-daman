@@ -63,7 +63,9 @@ namespace Pamor
             turnText.characterSpacing = 6;
             hintPanel = FramedPanel(hud.transform, "Hint", new Vector2(0.5f, 0f), new Vector2(0, 62), new Vector2(620, 76));
             hintText = Text(hintPanel, "Label", "", 34, Palette.AccentPrada, new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(600, 70));
-            hintText.characterSpacing = 6;
+            hintText.characterSpacing = 4;
+            hintText.enableAutoSizing = true;
+            hintText.fontSizeMin = 18; hintText.fontSizeMax = 34;
             hintPanel.parent.gameObject.SetActive(false);
 
             var left = FramedPanel(hud.transform, "Hitam Info", new Vector2(0f, 0.64f), new Vector2(170, 0), new Vector2(240, 210));
