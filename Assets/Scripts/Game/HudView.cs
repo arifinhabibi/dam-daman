@@ -16,7 +16,7 @@ namespace Pamor
     public class HudView : MonoBehaviour
     {
         public event Action ResumePressed, RestartPressed, TitlePressed, PausePressed;
-        public event Action PlayLocalPressed, PlayAiPressed, DifficultyPressed;
+        public event Action PlayLocalPressed, PlayAiPressed, DifficultyPressed, PlaySayembaraPressed;
         public event Action SetupRandomPressed, SetupReadyPressed, HandoffPressed;
         public event Action AjianPressed, CommanderPressed;
         public event Action<Commander> CommanderChosen;
@@ -28,6 +28,9 @@ namespace Pamor
         TextMeshProUGUI hitamTenaga, merahTenaga, ajianTitle, ajianDesc, ajianStatus, pancasonaText;
         GameObject ajianPanel, ajianButton, pancasonaPrompt;
         GameObject commanderSelect, commanderPanel, commanderButton;
+        GameObject sayembara;
+        RectTransform sayembaraButtons;
+        TextMeshProUGUI sayembaraTitle, sayembaraBody, timerText, titleRank;
         TextMeshProUGUI commanderSelectTitle, commanderTitle, commanderDesc, commanderStatus, hitamCommander, merahCommander;
         TextMeshProUGUI turnText, hintText, hitamCount, merahCount, hitamName, merahName, endedBanner, endedStats, difficultyLabel;
         Image turnDisc, fade, flash;
@@ -61,6 +64,7 @@ namespace Pamor
             turnDisc.sprite = MakeCircleSprite();
             turnText = Text(turnPanel, "Label", "GILIRAN HITAM", 40, Palette.Kelir, new Vector2(0.5f, 0.5f), new Vector2(30, 0), new Vector2(400, 80));
             turnText.characterSpacing = 6;
+            timerText = Text(turnPanel, "Timer", "", 40, Palette.AccentPrada, new Vector2(1f, 0.5f), new Vector2(-40, 0), new Vector2(70, 70));
             hintPanel = FramedPanel(hud.transform, "Hint", new Vector2(0.5f, 0f), new Vector2(0, 62), new Vector2(620, 76));
             hintText = Text(hintPanel, "Label", "", 34, Palette.AccentPrada, new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(600, 70));
             hintText.characterSpacing = 4;
@@ -121,9 +125,11 @@ namespace Pamor
             var shadow = name.gameObject.AddComponent<Shadow>();
             shadow.effectColor = Palette.Shadow; shadow.effectDistance = new Vector2(6, -6);
             Text(title.transform, "Subtitle", "DAM-DAMAN NUSANTARA", 40, WithAlpha(Palette.Kelir, 0.85f), new Vector2(0.5f, 0.6f), new Vector2(0, -150), new Vector2(1200, 60)).characterSpacing = 18;
-            Button(title.transform, "Play Local", "LAWAN TEMAN", new Vector2(0.5f, 0.3f), new Vector2(-250, 0), new Vector2(460, 96), () => PlayLocalPressed?.Invoke());
-            Button(title.transform, "Play AI", "LAWAN AI", new Vector2(0.5f, 0.3f), new Vector2(250, 0), new Vector2(460, 96), () => PlayAiPressed?.Invoke());
-            var diff = Button(title.transform, "Difficulty", "TINGKAT AI: SEDANG", new Vector2(0.5f, 0.3f), new Vector2(250, -112), new Vector2(460, 76), () => DifficultyPressed?.Invoke());
+            Button(title.transform, "Play Local", "LAWAN TEMAN", new Vector2(0.5f, 0.3f), new Vector2(-480, 0), new Vector2(440, 96), () => PlayLocalPressed?.Invoke());
+            Button(title.transform, "Play AI", "LAWAN AI", new Vector2(0.5f, 0.3f), new Vector2(0, 0), new Vector2(440, 96), () => PlayAiPressed?.Invoke());
+            Button(title.transform, "Play Sayembara", "SAYEMBARA", new Vector2(0.5f, 0.3f), new Vector2(480, 0), new Vector2(440, 96), () => PlaySayembaraPressed?.Invoke());
+            titleRank = Text(title.transform, "Rank", "", 30, WithAlpha(Palette.Kelir, 0.85f), new Vector2(0.5f, 0.3f), new Vector2(480, -100), new Vector2(440, 50));
+            var diff = Button(title.transform, "Difficulty", "TINGKAT AI: SEDANG", new Vector2(0.5f, 0.3f), new Vector2(0, -112), new Vector2(440, 76), () => DifficultyPressed?.Invoke());
             difficultyLabel = diff.GetComponentInChildren<TextMeshProUGUI>();
             difficultyLabel.fontSize = 28;
 
@@ -179,6 +185,22 @@ namespace Pamor
                            + $"<b>Aktif · {CommanderBook.ActiveName(c)} ({CommanderBook.ActiveCost(c)}):</b> {CommanderBook.ActiveDescription(c)}";
             }
 
+            // --- Sayembara: one reusable panel (standings, shop, pairings, results, final) with a row of buttons
+            sayembara = Panel(root, "Sayembara", WithAlpha(Palette.Shadow, 0.9f), Vector2.zero, Vector2.one).gameObject;
+            var frame = FramedPanel(sayembara.transform, "Frame", new Vector2(0.5f, 0.5f), new Vector2(0, 20), new Vector2(1300, 820));
+            sayembaraTitle = Text(frame, "Title", "SAYEMBARA", 56, Palette.AccentPrada, new Vector2(0.5f, 1f), new Vector2(0, -60), new Vector2(1240, 80));
+            sayembaraTitle.characterSpacing = 10;
+            sayembaraBody = Text(frame, "Body", "", 30, Palette.Kelir, new Vector2(0.5f, 1f), new Vector2(0, -400), new Vector2(1200, 560));
+            sayembaraBody.alignment = TextAlignmentOptions.TopLeft;
+            sayembaraBody.textWrappingMode = TextWrappingModes.Normal;
+            sayembaraBody.enableAutoSizing = true; sayembaraBody.fontSizeMin = 18; sayembaraBody.fontSizeMax = 30;
+            var row = new GameObject("Buttons", typeof(RectTransform));
+            sayembaraButtons = (RectTransform)row.transform;
+            sayembaraButtons.SetParent(frame, false);
+            sayembaraButtons.anchorMin = sayembaraButtons.anchorMax = new Vector2(0.5f, 0f);
+            sayembaraButtons.anchoredPosition = new Vector2(0, 70);
+            sayembara.SetActive(false);
+
             // --- Handoff: an opaque cover so the next player can't see the other's army
             handoff = Panel(root, "Handoff", Palette.Shadow, Vector2.zero, Vector2.one).gameObject;
             handoffTitle = Text(handoff.transform, "Label", "SERAHKAN KE MERAH", 100, Palette.AccentPrada, new Vector2(0.5f, 0.62f), Vector2.zero, new Vector2(1600, 140));
@@ -215,8 +237,37 @@ namespace Pamor
             setup.SetActive(state == GameState.Setup);
             handoff.SetActive(state == GameState.Handoff);
             commanderSelect.SetActive(state == GameState.CommanderSelect);
+            sayembara.SetActive(state == GameState.Sayembara);
             if (state != GameState.Playing) commanderPanel.SetActive(false);
         }
+
+        /// <summary>Fills the Sayembara panel. Each button is (label, action, enabled); the row is rebuilt every call.</summary>
+        public void ShowSayembara(string titleText, string body, params (string label, Action action, bool enabled)[] buttons)
+        {
+            sayembaraTitle.text = titleText;
+            sayembaraBody.text = body;
+            for (int i = sayembaraButtons.childCount - 1; i >= 0; i--) Destroy(sayembaraButtons.GetChild(i).gameObject);
+            float width = buttons.Length > 3 ? 230 : 320, gap = 20;
+            float total = buttons.Length * width + (buttons.Length - 1) * gap;
+            for (int i = 0; i < buttons.Length; i++)
+            {
+                var (label, action, enabled) = buttons[i];
+                var b = Button(sayembaraButtons, "Btn " + label, label, new Vector2(0.5f, 0.5f), new Vector2(-total / 2 + width / 2 + i * (width + gap), 0), new Vector2(width, 84), () => action());
+                b.GetComponent<Button>().interactable = enabled;
+                var t = b.GetComponentInChildren<TextMeshProUGUI>();
+                t.characterSpacing = 2;
+                t.enableAutoSizing = true; t.fontSizeMin = 16; t.fontSizeMax = 30;
+            }
+        }
+
+        /// <summary>The turn timer in the turn banner; negative hides it.</summary>
+        public void SetTimer(int seconds)
+        {
+            timerText.text = seconds < 0 ? "" : seconds.ToString();
+            timerText.color = seconds >= 0 && seconds <= 5 ? Palette.PieceB : Palette.AccentPrada;
+        }
+
+        public void SetTitleRank(string text) => titleRank.text = text;
 
         public void SetCommanderSelect(Side side) => commanderSelectTitle.text = "PILIH COMMANDER · " + SideWord(side);
 

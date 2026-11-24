@@ -99,11 +99,14 @@ namespace Pamor.Core
         public static int[] StartPoints(Side side) =>
             Board.AllPoints().Where(p => side == Side.Hitam ? BoardGraph.Xs[p] <= 3 : BoardGraph.Xs[p] >= 5).ToArray();
 
-        public bool IsValid(Side side, out string error)
+        public bool IsValid(Side side, out string error) => IsValid(side, RoleRules.ArmyCounts, out error);
+
+        /// <summary>Valid against a given army (Sayembara armies can have upgraded roles).</summary>
+        public bool IsValid(Side side, IReadOnlyDictionary<Role, int> army, out string error)
         {
             var points = StartPoints(side);
             if (Roles.Count != points.Length || !points.All(Roles.ContainsKey)) { error = "Every starting point needs a role."; return false; }
-            foreach (var kv in RoleRules.ArmyCounts)
+            foreach (var kv in army)
             {
                 int n = Roles.Values.Count(r => r == kv.Key);
                 if (n != kv.Value) { error = $"{kv.Key}: {n} placed, {kv.Value} required."; return false; }
@@ -130,11 +133,40 @@ namespace Pamor.Core
             return f;
         }
 
+        /// <summary>
+        /// Rearranges this formation to match an army: upgraded roles replace Prajurit (front column first,
+        /// so the special pieces fight), and surplus special roles turn back into Prajurit.
+        /// </summary>
+        public Formation FitTo(Side side, IReadOnlyDictionary<Role, int> army)
+        {
+            var f = Copy();
+            foreach (var kv in army)
+            {
+                var role = kv.Key;
+                int have = f.Roles.Values.Count(r => r == role);
+                int front = side == Side.Hitam ? 3 : 5;
+                while (have > kv.Value)
+                {
+                    var p = f.Roles.First(x => x.Value == role).Key;
+                    f.Roles[p] = Role.Prajurit; have--;
+                }
+                while (have < kv.Value && role != Role.Prajurit)
+                {
+                    var spare = f.Roles.Where(x => x.Value == Role.Prajurit).OrderByDescending(x => BoardGraph.Xs[x.Key] == front ? 1 : 0).Select(x => x.Key).DefaultIfEmpty(-1).First();
+                    if (spare < 0) break;
+                    f.Roles[spare] = role; have++;
+                }
+            }
+            return f;
+        }
+
         /// <summary>A random valid arrangement, with the Patih kept off the front column.</summary>
-        public static Formation Random(Side side, Random rng)
+        public static Formation Random(Side side, Random rng) => Random(side, RoleRules.ArmyCounts, rng);
+
+        public static Formation Random(Side side, IReadOnlyDictionary<Role, int> army, Random rng)
         {
             var points = StartPoints(side).ToList();
-            var bag = RoleRules.ArmyCounts.SelectMany(kv => Enumerable.Repeat(kv.Key, kv.Value)).ToList();
+            var bag = army.SelectMany(kv => Enumerable.Repeat(kv.Key, kv.Value)).ToList();
             var f = new Formation();
             int front = side == Side.Hitam ? 3 : 5;
             var safe = points.Where(p => BoardGraph.Xs[p] != front).ToList();

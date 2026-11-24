@@ -38,13 +38,13 @@ namespace Pamor.Core
             rng = seed.HasValue ? new Random(seed.Value) : new Random();
         }
 
-        public static Ai For(Difficulty difficulty, int? seed = null)
+        public static Ai For(Difficulty difficulty, int? seed = null, Rules rules = null)
         {
             switch (difficulty)
             {
-                case Difficulty.Mudah: return new Ai(1, 0.35, seed: seed);
-                case Difficulty.Sedang: return new Ai(3, 0.05, seed: seed);
-                default: return new Ai(5, 0, seed: seed);
+                case Difficulty.Mudah: return new Ai(1, 0.35, rules, seed);
+                case Difficulty.Sedang: return new Ai(3, 0.05, rules, seed);
+                default: return new Ai(5, 0, rules, seed);
             }
         }
 

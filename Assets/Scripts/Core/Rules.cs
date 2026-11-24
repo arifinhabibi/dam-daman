@@ -212,10 +212,31 @@ namespace Pamor.Core
 
         public bool HasAnyCapture(Board board) => Captures(board).Count > 0;
 
-        public bool IsDraw(Board board) => board.QuietMoves >= DrawQuietMoveLimit;
+        /// <summary>Sayembara quick rounds: the game stops after this many turns in total (0 = no cap).</summary>
+        public int TurnCap;
 
-        /// <summary>The winner, or null while the game goes on.</summary>
+        public bool CapReached(Board board) => TurnCap > 0 && board.Ply >= TurnCap;
+
+        public bool IsDraw(Board board)
+        {
+            if (board.QuietMoves >= DrawQuietMoveLimit) return true;
+            return CapReached(board) && DecidedWinner(board) == null && ArmyValue(board, Side.Hitam) == ArmyValue(board, Side.Merah);
+        }
+
+        /// <summary>The winner, or null while the game goes on (or at the turn cap with equal armies: a draw).</summary>
         public Side? Winner(Board board)
+        {
+            var decided = DecidedWinner(board);
+            if (decided.HasValue) return decided;
+            if (CapReached(board))
+            {
+                int h = ArmyValue(board, Side.Hitam), m = ArmyValue(board, Side.Merah);
+                return h > m ? Side.Hitam : m > h ? Side.Merah : (Side?)null;
+            }
+            return null;
+        }
+
+        Side? DecidedWinner(Board board)
         {
             foreach (var side in new[] { Side.Hitam, Side.Merah })
             {
@@ -224,6 +245,26 @@ namespace Pamor.Core
             }
             if (LegalMoves(board).Count == 0) return Board.Other(board.ToMove);
             return null;
+        }
+
+        /// <summary>Points for deciding a capped round: Prajurit 1, Telik Sandi/Dukun 2, Pendekar/Senopati 3, Dam 4, Patih 5.</summary>
+        public static int PieceValue(Piece p)
+        {
+            if (p.IsDam) return 4;
+            switch (p.Role)
+            {
+                case Role.Patih: return 5;
+                case Role.Pendekar: case Role.Senopati: return 3;
+                case Role.Dukun: case Role.TelikSandi: return 2;
+                default: return 1;
+            }
+        }
+
+        public static int ArmyValue(Board board, Side side)
+        {
+            int v = 0;
+            for (int p = 0; p < BoardGraph.PointCount; p++) if (board.Owner(p) == side) v += PieceValue(board[p]);
+            return v;
         }
 
         static bool CanCaptureNow(Board board, Piece p) =>

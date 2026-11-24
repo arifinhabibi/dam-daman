@@ -141,6 +141,13 @@ namespace Pamor.Core
             return b;
         }
 
+        /// <summary>Chooses who moves first (Sayembara: the away player). Only before the first move.</summary>
+        public void SetFirstMover(Side side)
+        {
+            if (Ply != 0) throw new InvalidOperationException("The game has already started.");
+            ToMove = side;
+        }
+
         /// <summary>An empty board with the given side to move; for tests and puzzles.</summary>
         public static Board CreateEmpty(Side toMove = Side.Hitam) => new Board { ToMove = toMove };
 

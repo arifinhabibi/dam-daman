@@ -69,6 +69,19 @@ Each player picks a Commander before Fase Susun (vs AI: the AI picks at random).
 - **Lutung Kasarung:** passive: the Dukun shields its two most important neighbours. Active **Wujud Asli (6):** one Prajurit becomes a Dam.
 - The AI weighs its Commander active each turn with the same shorter search it uses for ajian (Kerbau charges are only tried when they take something; options are capped at 40).
 
+## Sayembara, offline (built 2026-11-24)
+
+The full lobby loop runs offline against 7 AI players, as the GDD roadmap suggests ("mekanik lobby bisa diuji penuh dengan AI sebelum ada server"). Owner decisions: simple shop, Commander once per lobby, GDD timers, local Pamor.
+- **Flow:** SAYEMBARA on the title → Commander (kept for the lobby) → standings → each round: Fase Belanja (30 s) → pairings → Fase Susun → your 1v1 → results → next round, until you're out or win → final place and Pamor.
+- **Shop:** income 5 coins per round + streak bonus (+1 at 2 wins in a row, +2 at 3, +3 at 4+); unspent coins carry over. Upgrades turn a Prajurit into Pendekar (3), Senopati (5), Dukun (3) or Telik Sandi (2); limits Pendekar 4, others 2, at least 4 Prajurit. Upgrades carry over between rounds. Bots buy at random (sometimes saving).
+- **Pairing:** random, no immediate rematch; whoever has had fewer home games is home. Home moves second; away moves first. With an odd number left, one player faces a "bayangan" (an eliminated player's army, played by the AI; it takes no damage). No board skins exist yet, so "home board" changes nothing visible.
+- **Rounds:** 10 turns per player (20 turns total), then the winner is decided by army value: Prajurit 1, Telik Sandi/Dukun 2, Pendekar/Senopati 3, Dam 4, Patih 5. Equal value = draw: both lose HP equal to the round number. Loser loses HP = winner's pieces left + round number.
+- **Timer:** 20 s per turn for you; at 0 the autopilot moves (biggest capture, else a random safe move). The GDD's strikes and AFK penalties are not built (offline has no one to penalise).
+- **Elimination and places:** at 0 HP you're out; several out in the same round place by HP (lower places worse). The lobby ends for you when you're out (your place is final then).
+- **Pamor:** saved on the device (`pamor.rating`, starts 1000), GDD table +40..−40 scaled by lobby average ÷ your Pamor (clamped 0.5..1.5); rank titles per the GDD. Bot Pamor is your Pamor ± 150.
+- **Bot-vs-bot rounds** are resolved instantly with a fast shallow AI without ajian or Commander actives. Your opponent in your own round uses the full AI at the chosen difficulty, with ajian and its Commander. A Sangkuriang bot places no blockers in Sayembara.
+- Leaving a round (pause → ULANG/JUDUL) leaves the lobby.
+
 ## Prototype choices not in the GDD (to confirm or replace)
 
 - AI difficulty names are Mudah / Sedang / Sulit; the GDD names them **Prajurit / Senopati / Patih**.

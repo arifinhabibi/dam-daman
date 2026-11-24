@@ -8,14 +8,14 @@ using UnityEngine.InputSystem;
 
 namespace Pamor
 {
-    public enum GameState { Title, CommanderSelect, Setup, Handoff, Playing, Paused, Ended }
-    public enum MatchMode { LocalPvP, VsAi }
+    public enum GameState { Title, CommanderSelect, Setup, Handoff, Playing, Paused, Ended, Sayembara }
+    public enum MatchMode { LocalPvP, VsAi, Sayembara }
 
     /// <summary>
     /// Owns one match: rules state, shell state machine, pointer input and the AI opponent.
     /// Local PvP is hotseat on one device; vs AI the player is Hitam (moves first) and the AI is Merah.
     /// </summary>
-    public class GameController : MonoBehaviour
+    public partial class GameController : MonoBehaviour
     {
         const string DifficultyPref = "pamor.difficulty";
         const float MinAiThinkSeconds = 0.6f;
@@ -35,17 +35,20 @@ namespace Pamor
         public bool Busy { get; private set; }
         public bool AiThinking { get; private set; }
 
-        readonly Rules rules = Rules.Default;
+        Rules rules = Rules.Default;
+
+        /// <summary>There is an AI opponent (vs AI and Sayembara); it always plays Merah.</summary>
+        bool HasAi => Mode != MatchMode.LocalPvP;
         int? selected;
         Camera cam;
         Coroutine turnRoutine;
         bool transitioning;
         int matchId;
 
-        bool IsAiTurn => Mode == MatchMode.VsAi && Board.ToMove == AiSide;
+        bool IsAiTurn => HasAi && Board.ToMove == AiSide;
 
         /// <summary>Whose eyes the board is drawn for: the player vs AI; the side to move in hotseat.</summary>
-        Side Viewer => Mode == MatchMode.VsAi ? Board.Other(AiSide) : Board.ToMove;
+        Side Viewer => HasAi ? Board.Other(AiSide) : Board.ToMove;
 
         void Start()
         {
@@ -55,8 +58,11 @@ namespace Pamor
             hud.SetDifficulty(AiDifficulty);
             hud.ResumePressed += () => SetPaused(false);
             hud.PausePressed += () => SetPaused(true);
-            hud.RestartPressed += () => BeginTransition(GameState.Playing, Mode);
-            hud.TitlePressed += () => BeginTransition(GameState.Title, Mode);
+            // In Sayembara, leaving the match leaves the lobby.
+            hud.RestartPressed += () => { if (Mode == MatchMode.Sayembara) ExitSayembara(); else BeginTransition(GameState.Playing, Mode); };
+            hud.TitlePressed += () => { if (Mode == MatchMode.Sayembara) ExitSayembara(); else BeginTransition(GameState.Title, Mode); };
+            hud.PlaySayembaraPressed += () => BeginTransition(GameState.Playing, MatchMode.Sayembara);
+            RefreshTitleRank();
             hud.PlayLocalPressed += () => BeginTransition(GameState.Playing, MatchMode.LocalPvP);
             hud.PlayAiPressed += () => BeginTransition(GameState.Playing, MatchMode.VsAi);
             hud.DifficultyPressed += CycleDifficulty;
@@ -80,6 +86,7 @@ namespace Pamor
             }
 
             HandleGestures();
+            TickTurnTimer();
         }
 
         // A press that moves less than this (in screen pixels, scaled by DPI) is a tap; more is a camera drag.
@@ -252,7 +259,7 @@ namespace Pamor
         void DoCast(int caster, int target)
         {
             var result = rules.Cast(Board, caster, target);
-            Debug.Log($"[Pamor] {result.Caster}{(Mode == MatchMode.VsAi && result.Caster == AiSide ? " (AI)" : "")} ajian {AjianBook.Name(result.Ajian)} on {BoardGraph.Name(target)}");
+            Debug.Log($"[Pamor] {result.Caster}{(HasAi && result.Caster == AiSide ? " (AI)" : "")} ajian {AjianBook.Name(result.Ajian)} on {BoardGraph.Name(target)}");
             StartCoroutine(PlayCast(result));
         }
 
@@ -320,7 +327,7 @@ namespace Pamor
                 yield return AskPancasona(enemy);
 
             var result = rules.CastCommander(Board, targets);
-            Debug.Log($"[Pamor] {caster}{(Mode == MatchMode.VsAi && caster == AiSide ? " (AI)" : "")} commander {CommanderBook.ActiveName(result.Active.Value)}"
+            Debug.Log($"[Pamor] {caster}{(HasAi && caster == AiSide ? " (AI)" : "")} commander {CommanderBook.ActiveName(result.Active.Value)}"
                       + (targets.Length > 0 ? " on " + string.Join(",", targets.Select(BoardGraph.Name)) : "")
                       + (result.CapturedPieces.Count > 0 ? $" [{string.Join(",", result.CapturedPieces.Select(p => p.Role.ToString()))}]" : ""));
             hud.NudgeHint(CommanderBook.ActiveName(result.Active.Value).ToUpperInvariant() + "!");
@@ -339,7 +346,7 @@ namespace Pamor
         IEnumerator AskPancasona(Side side)
         {
             bool use;
-            if (Mode == MatchMode.VsAi && side == AiSide) use = true;
+            if (HasAi && side == AiSide) use = true;
             else
             {
                 pancasonaAnswer = null;
@@ -361,8 +368,10 @@ namespace Pamor
             boardView.RefreshRoles(Board, Viewer, revealAll: true);
             hud.HideCommander();
             hud.HideAjian();
+            hud.SetTimer(-1);
             EnterState(GameState.Ended);
             StartCoroutine(hud.PlayEnd(EndBanner(), MovesPlayed));
+            if (Mode == MatchMode.Sayembara && lobby != null) StartCoroutine(AfterRoundMatch());
             return true;
         }
 
@@ -373,7 +382,7 @@ namespace Pamor
             {
                 if (!rules.CanUsePancasona(Board, side) || !rules.KillsPatih(Board, move, side)) continue;
                 bool use;
-                if (Mode == MatchMode.VsAi && side == AiSide) use = true;
+                if (HasAi && side == AiSide) use = true;
                 else
                 {
                     pancasonaAnswer = null;
@@ -398,7 +407,7 @@ namespace Pamor
             yield return OfferPancasona(move);
             var result = rules.Apply(Board, move);
             MovesPlayed++;
-            Debug.Log($"[Pamor] {mover}{(Mode == MatchMode.VsAi && mover == AiSide ? " (AI)" : "")} {move}"
+            Debug.Log($"[Pamor] {mover}{(HasAi && mover == AiSide ? " (AI)" : "")} {move}"
                       + (result.Promoted ? " = Dam" : "")
                       + (result.Burned >= 0 ? $" (dibakar {BoardGraph.Name(result.Burned)})" : "")
                       + (result.Demoted.Count > 0 ? $" (turun pangkat {string.Join(",", result.Demoted.Select(BoardGraph.Name))})" : "")
@@ -422,17 +431,8 @@ namespace Pamor
                         : result.Demoted.Count > 0 ? "DAM TURUN PANGKAT"
                         : null;
 
-            Winner = rules.Winner(Board);
-            IsDraw = !Winner.HasValue && rules.IsDraw(Board);
             Busy = false;
-            if (Winner.HasValue || IsDraw)
-            {
-                Debug.Log($"[Pamor] {(IsDraw ? "draw" : Winner + " wins")} after {MovesPlayed} moves");
-                boardView.RefreshRoles(Board, Viewer, revealAll: true);
-                EnterState(GameState.Ended);
-                yield return hud.PlayEnd(EndBanner(), MovesPlayed);
-                yield break;
-            }
+            if (CheckEnd()) yield break;
             if (Mode == MatchMode.LocalPvP && Board.ToMove != mover)
             {
                 // Pass the phone: cover the board so the next player can't see the other army's roles.
@@ -489,9 +489,17 @@ namespace Pamor
             EnterState(GameState.CommanderSelect);
         }
 
+        /// <summary>The army a side brings: the standard 16, or a Sayembara player's upgraded army.</summary>
+        IReadOnlyDictionary<Role, int> ArmyOf(Side side)
+        {
+            if (Mode != MatchMode.Sayembara || lobby == null) return RoleRules.ArmyCounts;
+            return side == Side.Hitam ? lobby.Human.Army() : opponent?.Army() ?? (IReadOnlyDictionary<Role, int>)RoleRules.ArmyCounts;
+        }
+
         public void ChooseCommander(Commander c)
         {
             if (State != GameState.CommanderSelect) return;
+            if (Mode == MatchMode.Sayembara && lobby == null) { StartLobby(c); return; }
             commanders[SideIndex(setupSide)] = c;
             if (c != Commander.Sangkuriang) blockers[SideIndex(setupSide)].Clear();
             Debug.Log($"[Pamor] {setupSide} chooses {CommanderBook.Name(c)}");
@@ -563,14 +571,14 @@ namespace Pamor
         public void RandomizeSetup()
         {
             if (State != GameState.Setup) return;
-            formations[SideIndex(setupSide)] = Formation.Random(setupSide, new System.Random());
+            formations[SideIndex(setupSide)] = Formation.Random(setupSide, ArmyOf(setupSide), new System.Random());
             BeginSetup(setupSide);
         }
 
         public void ConfirmSetup()
         {
             if (State != GameState.Setup) return;
-            if (!FormationOf(setupSide).IsValid(setupSide, out var error)) { hud.SetSetup(setupSide, error); return; }
+            if (!FormationOf(setupSide).IsValid(setupSide, ArmyOf(setupSide), out var error)) { hud.SetSetup(setupSide, error); return; }
             SetupDeselect();
             if (Mode == MatchMode.LocalPvP && setupSide == Side.Hitam) { ShowHandoff(Side.Merah, () => BeginCommanderSelect(Side.Merah)); return; }
             ResetMatch();
@@ -627,7 +635,7 @@ namespace Pamor
             AiThinking = true;
             int id = matchId;
             var snapshot = Board.Clone();
-            var ai = Ai.For(AiDifficulty);
+            var ai = Ai.For(AiDifficulty, null, rules.TurnCap > 0 ? new Rules { TurnCap = rules.TurnCap, AutoPancasona = true } : null);
             var task = Task.Run(() => ai.ChooseTurn(snapshot));
             float started = Time.time;
             while (!task.IsCompleted || Time.time - started < MinAiThinkSeconds) yield return null;
@@ -658,7 +666,8 @@ namespace Pamor
         string EndBanner()
         {
             if (IsDraw) return "SERI";
-            if (Mode == MatchMode.VsAi) return Winner == AiSide ? "AI MENANG" : "KAMU MENANG";
+            if (Mode == MatchMode.Sayembara) return Winner == AiSide ? "KALAH RONDE" : "MENANG RONDE";
+            if (HasAi) return Winner == AiSide ? "AI MENANG" : "KAMU MENANG";
             return Winner == Side.Hitam ? "HITAM MENANG" : "MERAH MENANG";
         }
 
@@ -666,7 +675,7 @@ namespace Pamor
         {
             bool mustCapture = rules.HasAnyCapture(Board);
             string label;
-            if (Mode == MatchMode.VsAi) label = IsAiTurn ? "GILIRAN AI" : "GILIRANMU";
+            if (HasAi) label = IsAiTurn ? "GILIRAN AI" : "GILIRANMU";
             else label = Board.ToMove == Side.Hitam ? "GILIRAN HITAM" : "GILIRAN MERAH";
             string hint = IsAiTurn ? "AI BERPIKIR..." : mustCapture ? "WAJIB MAKAN!" : "";
             hud.SetTurn(Board.ToMove, label, hint);
@@ -683,10 +692,15 @@ namespace Pamor
             matchId++;
             Busy = false;
             AiThinking = false;
-            // Each player's Fase Susun arrangement; the AI arranges itself at random every match.
+            // Each player's Fase Susun arrangement; the vs-AI opponent arranges itself at random every match.
+            // In Sayembara the opponent's army, formation and Commander come from the lobby (StartRoundMatch).
+            bool round = Mode == MatchMode.Sayembara && lobby != null && opponent != null;
             if (Mode == MatchMode.VsAi) { formations[SideIndex(AiSide)] = Formation.Random(AiSide, new System.Random()); PickAiCommander(); }
+            rules = round ? new Rules { TurnCap = Sayembara.TurnsPerPlayer * 2 } : Rules.Default;
             Board = Board.CreateStandard(FormationOf(Side.Hitam), FormationOf(Side.Merah));
             ApplyCommandersAndBlockers(Board);
+            // Sayembara: the away player moves first.
+            if (round && humanPairing.Home == 0) Board.SetFirstMover(Side.Merah);
             MovesPlayed = 0;
             Winner = null;
             IsDraw = false;
@@ -698,7 +712,8 @@ namespace Pamor
             hud.HideAjian();
             hud.ShowPancasonaPrompt(Side.Hitam, false);
             targeting = false;
-            if (Mode == MatchMode.VsAi) hud.SetPlayerNames("KAMU", "AI " + AiDifficulty.ToString().ToUpperInvariant());
+            if (round) hud.SetPlayerNames("KAMU", opponent.Name.ToUpperInvariant());
+            else if (HasAi) hud.SetPlayerNames("KAMU", "AI " + AiDifficulty.ToString().ToUpperInvariant());
             else hud.SetPlayerNames("HITAM", "MERAH");
             RefreshTurnHints();
         }
@@ -729,9 +744,11 @@ namespace Pamor
             yield return hud.FadeOut();
             Time.timeScale = 1f;
             Mode = mode;
+            if (mode != MatchMode.Sayembara) { lobby = null; opponent = null; }
             ResetMatch();
-            // Starting (or restarting) a match: Commander, then Fase Susun (last match's arrangement is kept).
-            if (next == GameState.Playing) BeginCommanderSelect(Side.Hitam);
+            // Starting a match: Commander, then Fase Susun (last match's arrangement is kept). Sayembara opens its lobby.
+            if (next == GameState.Playing && mode == MatchMode.Sayembara) BeginSayembara();
+            else if (next == GameState.Playing) BeginCommanderSelect(Side.Hitam);
             else EnterState(next);
             yield return hud.FadeIn();
             transitioning = false;
