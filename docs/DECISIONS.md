@@ -31,6 +31,16 @@ Still open: how the GDD's passive-limit "outer edge collapse" maps onto this boa
 - **Characters:** every role gets its own placeholder 3D figure in a wayang-like silhouette (Patih: tall crown; Senopati: spear; Dukun: staff; etc.) so roles read in play; real art replaces them later.
 - **Fase Susun and hidden roles:** enemy roles are hidden (shown as Prajurit) until revealed. Local PvP uses a pass-the-phone cover screen between setups (and between turns, so each player only sees their own roles). vs AI: the AI arranges its own army.
 
+**Implemented 2026-11-24 (commit 8d897cd), with these implementation choices to confirm:**
+- Senopati moves up to 2 points but never backward; Pendekar and Patih move and capture in any direction.
+- Dukun shield triggers **when the Dukun itself moves**: it shields its most important neighbour (Patih > Senopati > Pendekar > Dam > Dukun > Telik Sandi > Prajurit) for the opponent's next turn. The shield is visible and reveals the Dukun.
+- Reveal rule as proposed below (any capture; Pendekar/Patih moving backward; Senopati moving 2; Dukun shielding; promotion).
+- A Senopati's fall blocks its side's (non-Dam) Prajurit from capturing on their next turn; Telik Sandi is not affected.
+- Only Prajurit promote to Dam (not Telik Sandi, even though it looks like one).
+- Draw counter counts only turns where a backward-capable piece (Dam, Pendekar, Patih) moved without capture or burn.
+- The AI currently sees hidden enemy roles.
+- Until Fase Susun exists, the player uses the default formation and the AI a random one (Patih never on its front column).
+
 Still open: the exact reveal rule (proposal: a piece is revealed when it does something only its role can do, captures, or is captured; Telik Sandi stays hidden until it captures or is captured, per the GDD), and where Fase Susun may place pieces (the GDD says "3 baris awal"; proposal: the player's own 16 starting points).
 
 ## Prototype choices not in the GDD (to confirm or replace)
