@@ -18,7 +18,8 @@ namespace Pamor
         public event Action ResumePressed, RestartPressed, TitlePressed, PausePressed;
         public event Action PlayLocalPressed, PlayAiPressed, DifficultyPressed;
         public event Action SetupRandomPressed, SetupReadyPressed, HandoffPressed;
-        public event Action AjianPressed;
+        public event Action AjianPressed, CommanderPressed;
+        public event Action<Commander> CommanderChosen;
         public event Action<bool> PancasonaAnswered;
 
         RectTransform root;
@@ -26,6 +27,8 @@ namespace Pamor
         TextMeshProUGUI setupTitle, setupHint, handoffTitle, handoffButtonLabel, roleInfo;
         TextMeshProUGUI hitamTenaga, merahTenaga, ajianTitle, ajianDesc, ajianStatus, pancasonaText;
         GameObject ajianPanel, ajianButton, pancasonaPrompt;
+        GameObject commanderSelect, commanderPanel, commanderButton;
+        TextMeshProUGUI commanderSelectTitle, commanderTitle, commanderDesc, commanderStatus, hitamCommander, merahCommander;
         TextMeshProUGUI turnText, hintText, hitamCount, merahCount, hitamName, merahName, endedBanner, endedStats, difficultyLabel;
         Image turnDisc, fade, flash;
         RectTransform endedBannerRect, hintPanel;
@@ -63,19 +66,21 @@ namespace Pamor
             hintText.characterSpacing = 6;
             hintPanel.parent.gameObject.SetActive(false);
 
-            var left = FramedPanel(hud.transform, "Hitam Info", new Vector2(0f, 0.5f), new Vector2(170, 0), new Vector2(240, 210));
+            var left = FramedPanel(hud.transform, "Hitam Info", new Vector2(0f, 0.64f), new Vector2(170, 0), new Vector2(240, 210));
             hitamTenaga = Text(left, "Tenaga", "TENAGA 0/10", 26, Palette.Kelir, new Vector2(0.5f, 0f), new Vector2(0, 22), new Vector2(220, 36));
-            hitamName = Text(left, "Name", "HITAM", 34, Palette.Kelir, new Vector2(0.5f, 1f), new Vector2(0, -40), new Vector2(220, 50));
+            hitamName = Text(left, "Name", "HITAM", 34, Palette.Kelir, new Vector2(0.5f, 1f), new Vector2(0, -34), new Vector2(220, 50));
             hitamName.characterSpacing = 6;
+            hitamCommander = Text(left, "Commander", "", 20, Palette.AccentPrada, new Vector2(0.5f, 1f), new Vector2(0, -66), new Vector2(220, 28));
             hitamCount = Text(left, "Count", "12", 64, Palette.AccentPrada, new Vector2(0.5f, 0f), new Vector2(0, 90), new Vector2(220, 80));
-            var right = FramedPanel(hud.transform, "Merah Info", new Vector2(1f, 0.5f), new Vector2(-170, 0), new Vector2(240, 210));
+            var right = FramedPanel(hud.transform, "Merah Info", new Vector2(1f, 0.64f), new Vector2(-170, 0), new Vector2(240, 210));
             merahTenaga = Text(right, "Tenaga", "TENAGA 0/10", 26, Palette.Kelir, new Vector2(0.5f, 0f), new Vector2(0, 22), new Vector2(220, 36));
-            merahName = Text(right, "Name", "MERAH", 34, Palette.Kelir, new Vector2(0.5f, 1f), new Vector2(0, -40), new Vector2(220, 50));
+            merahName = Text(right, "Name", "MERAH", 34, Palette.Kelir, new Vector2(0.5f, 1f), new Vector2(0, -34), new Vector2(220, 50));
             merahName.characterSpacing = 6;
+            merahCommander = Text(right, "Commander", "", 20, Palette.AccentPrada, new Vector2(0.5f, 1f), new Vector2(0, -66), new Vector2(220, 28));
             merahCount = Text(right, "Count", "12", 64, Palette.AccentPrada, new Vector2(0.5f, 0f), new Vector2(0, 90), new Vector2(220, 80));
 
             // Ajian panel: appears when one of your pieces is selected.
-            var ajian = FramedPanel(hud.transform, "Ajian", new Vector2(1f, 0f), new Vector2(-230, 230), new Vector2(400, 230));
+            var ajian = FramedPanel(hud.transform, "Ajian", new Vector2(1f, 0f), new Vector2(-230, 150), new Vector2(400, 230));
             ajianPanel = ajian.parent.gameObject;
             ajianTitle = Text(ajian, "Title", "AJIAN", 30, Palette.AccentPrada, new Vector2(0.5f, 1f), new Vector2(0, -28), new Vector2(380, 40));
             ajianDesc = Text(ajian, "Desc", "", 22, Palette.Kelir, new Vector2(0.5f, 1f), new Vector2(0, -88), new Vector2(370, 80));
@@ -84,6 +89,17 @@ namespace Pamor
             ajianButton = Button(ajian, "Cast", "PAKAI AJIAN", new Vector2(0.5f, 0f), new Vector2(0, 42), new Vector2(300, 64), () => AjianPressed?.Invoke());
             ajianButton.GetComponentInChildren<TextMeshProUGUI>().fontSize = 30;
             ajianPanel.SetActive(false);
+
+            // Commander active panel: bottom-left, during your own turn.
+            var cmd = FramedPanel(hud.transform, "Commander", new Vector2(0f, 0f), new Vector2(230, 150), new Vector2(400, 230));
+            commanderPanel = cmd.parent.gameObject;
+            commanderTitle = Text(cmd, "Title", "", 26, Palette.AccentPrada, new Vector2(0.5f, 1f), new Vector2(0, -26), new Vector2(380, 40));
+            commanderDesc = Text(cmd, "Desc", "", 20, Palette.Kelir, new Vector2(0.5f, 1f), new Vector2(0, -86), new Vector2(370, 80));
+            commanderDesc.textWrappingMode = TextWrappingModes.Normal;
+            commanderStatus = Text(cmd, "Status", "", 20, WithAlpha(Palette.Kelir, 0.7f), new Vector2(0.5f, 0f), new Vector2(0, 92), new Vector2(370, 30));
+            commanderButton = Button(cmd, "Use", "PAKAI", new Vector2(0.5f, 0f), new Vector2(0, 42), new Vector2(300, 64), () => CommanderPressed?.Invoke());
+            commanderButton.GetComponentInChildren<TextMeshProUGUI>().fontSize = 30;
+            commanderPanel.SetActive(false);
 
             // Pancasona prompt: a reaction asked when the player's Patih is about to fall.
             pancasonaPrompt = Panel(hud.transform, "Pancasona Prompt", WithAlpha(Palette.Shadow, 0.82f), Vector2.zero, Vector2.one).gameObject;
@@ -142,6 +158,25 @@ namespace Pamor
             roleInfo.textWrappingMode = TextWrappingModes.Normal;
             roleInfo.alignment = TextAlignmentOptions.TopLeft;
 
+            // --- Commander select: six cards over a dim board
+            commanderSelect = Panel(root, "Commander Select", WithAlpha(Palette.Shadow, 0.88f), Vector2.zero, Vector2.one).gameObject;
+            commanderSelectTitle = Text(commanderSelect.transform, "Title", "PILIH COMMANDER · HITAM", 56, Palette.AccentPrada, new Vector2(0.5f, 1f), new Vector2(0, -80), new Vector2(1400, 80));
+            commanderSelectTitle.characterSpacing = 10;
+            for (int i = 0; i < CommanderBook.All.Length; i++)
+            {
+                var c = CommanderBook.All[i];
+                var pos = new Vector2((i % 3 - 1) * 600, i < 3 ? 140 : -200);
+                var card = Button(commanderSelect.transform, "Card " + c, "", new Vector2(0.5f, 0.5f), pos, new Vector2(570, 320), () => CommanderChosen?.Invoke(c));
+                var label = card.GetComponentInChildren<TextMeshProUGUI>();
+                label.fontSize = 26; label.characterSpacing = 0;
+                label.textWrappingMode = TextWrappingModes.Normal;
+                label.alignment = TextAlignmentOptions.TopLeft;
+                label.rectTransform.sizeDelta = new Vector2(530, 290);
+                label.text = $"<size=34><color=#{ColorUtility.ToHtmlStringRGB(Palette.AccentPrada)}>{CommanderBook.Name(c).ToUpperInvariant()}</color></size>  <size=24>({CommanderBook.Origin(c)})</size>\n\n"
+                           + $"<b>Pasif:</b> {CommanderBook.Passive(c)}\n\n"
+                           + $"<b>Aktif · {CommanderBook.ActiveName(c)} ({CommanderBook.ActiveCost(c)}):</b> {CommanderBook.ActiveDescription(c)}";
+            }
+
             // --- Handoff: an opaque cover so the next player can't see the other's army
             handoff = Panel(root, "Handoff", Palette.Shadow, Vector2.zero, Vector2.one).gameObject;
             handoffTitle = Text(handoff.transform, "Label", "SERAHKAN KE MERAH", 100, Palette.AccentPrada, new Vector2(0.5f, 0.62f), Vector2.zero, new Vector2(1600, 140));
@@ -177,7 +212,29 @@ namespace Pamor
             ended.SetActive(state == GameState.Ended);
             setup.SetActive(state == GameState.Setup);
             handoff.SetActive(state == GameState.Handoff);
+            commanderSelect.SetActive(state == GameState.CommanderSelect);
+            if (state != GameState.Playing) commanderPanel.SetActive(false);
         }
+
+        public void SetCommanderSelect(Side side) => commanderSelectTitle.text = "PILIH COMMANDER · " + SideWord(side);
+
+        public void SetCommanders(Commander? hitam, Commander? merah)
+        {
+            hitamCommander.text = hitam.HasValue ? CommanderBook.Name(hitam.Value) : "";
+            merahCommander.text = merah.HasValue ? CommanderBook.Name(merah.Value) : "";
+        }
+
+        /// <summary>Shows the active player's Commander active; blocker is why it can't be used now (null = ready).</summary>
+        public void ShowCommander(Commander c, string blocker)
+        {
+            commanderPanel.SetActive(true);
+            commanderTitle.text = $"{CommanderBook.ActiveName(c).ToUpperInvariant()} · {CommanderBook.ActiveCost(c)}";
+            commanderDesc.text = CommanderBook.ActiveDescription(c);
+            commanderStatus.text = blocker ?? CommanderBook.Name(c) + " siap.";
+            commanderButton.GetComponent<Button>().interactable = blocker == null;
+        }
+
+        public void HideCommander() => commanderPanel.SetActive(false);
 
         static string SideWord(Side s) => s == Side.Hitam ? "HITAM" : "MERAH";
 
@@ -358,3 +415,4 @@ namespace Pamor
         }
     }
 }
+

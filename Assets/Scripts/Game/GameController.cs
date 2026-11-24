@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using Pamor.Core;
@@ -7,7 +8,7 @@ using UnityEngine.InputSystem;
 
 namespace Pamor
 {
-    public enum GameState { Title, Setup, Handoff, Playing, Paused, Ended }
+    public enum GameState { Title, CommanderSelect, Setup, Handoff, Playing, Paused, Ended }
     public enum MatchMode { LocalPvP, VsAi }
 
     /// <summary>
@@ -63,6 +64,8 @@ namespace Pamor
             hud.SetupReadyPressed += ConfirmSetup;
             hud.HandoffPressed += ConfirmHandoff;
             hud.AjianPressed += PressAjian;
+            hud.CommanderPressed += PressCommander;
+            hud.CommanderChosen += ChooseCommander;
             hud.PancasonaAnswered += yes => pancasonaAnswer = yes;
             ResetMatch();
             EnterState(GameState.Title);
@@ -147,6 +150,22 @@ namespace Pamor
         public void Tap(int point)
         {
             if (State != GameState.Playing || Busy || IsAiTurn) return;
+            if (commanderTargeting)
+            {
+                var valid = rules.CommanderTargets(Board, commanderChosen);
+                if (!valid.Contains(point)) { CancelCommanderTargeting("DIBATALKAN"); return; }
+                commanderChosen.Add(point);
+                var c = Board.CommanderOf(Board.ToMove).Value;
+                if (commanderChosen.Count < CommanderBook.TargetCount(c))
+                {
+                    boardView.ShowDestinations(rules.CommanderTargets(Board, commanderChosen));
+                    hud.NudgeHint(CommanderBook.TargetPrompt(c, commanderChosen.Count));
+                    return;
+                }
+                commanderTargeting = false;
+                StartCoroutine(CommanderCast(commanderChosen.ToArray()));
+                return;
+            }
             if (targeting)
             {
                 // Santet: the tap picks the target, or cancels.
@@ -202,6 +221,8 @@ namespace Pamor
             if (selected.HasValue) boardView.PieceAt(selected.Value)?.SetSelected(false);
             selected = null;
             targeting = false;
+            commanderTargeting = false;
+            commanderChosen.Clear();
             boardView.ClearDestinations();
             hud.HideAjian();
         }
@@ -245,10 +266,104 @@ namespace Pamor
             boardView.RefreshRoles(Board, Viewer);
             hud.SetTenaga(Board.Tenaga(Side.Hitam), Board.Tenaga(Side.Merah));
             Busy = wasBusy;
+            RefreshCommanderPanel();
             // Re-show the caster's moves: an ajian can change them (e.g. Saipi Angin, Supit Urang).
             if (!IsAiTurn && Board.Owner(result.CasterPoint) == Board.ToMove)
                 Select(result.CasterPoint, rules.LegalMoves(Board).Where(m => m.From == result.CasterPoint).Select(m => m.To).Distinct());
             else Deselect();
+        }
+
+        // ---------- Commander active
+
+        bool commanderTargeting;
+        readonly List<int> commanderChosen = new List<int>();
+
+        /// <summary>Shows the Commander panel for the player to move (hidden on the AI's turn).</summary>
+        void RefreshCommanderPanel()
+        {
+            var c = Board.CommanderOf(Board.ToMove);
+            if (State != GameState.Playing || IsAiTurn || !c.HasValue) { hud.HideCommander(); return; }
+            hud.ShowCommander(c.Value, rules.CommanderBlocker(Board));
+        }
+
+        void PressCommander()
+        {
+            if (State != GameState.Playing || Busy || IsAiTurn) return;
+            var blocker = rules.CommanderBlocker(Board);
+            if (blocker != null) { hud.NudgeHint(blocker.ToUpperInvariant()); return; }
+            var c = Board.CommanderOf(Board.ToMove).Value;
+            Deselect();
+            commanderChosen.Clear();
+            if (CommanderBook.TargetCount(c) == 0) { StartCoroutine(CommanderCast(new int[0])); return; }
+            commanderTargeting = true;
+            boardView.ShowDestinations(rules.CommanderTargets(Board, commanderChosen));
+            hud.NudgeHint(CommanderBook.TargetPrompt(c, 0));
+        }
+
+        void CancelCommanderTargeting(string why)
+        {
+            commanderTargeting = false;
+            commanderChosen.Clear();
+            boardView.ClearDestinations();
+            hud.NudgeHint(why);
+        }
+
+        /// <summary>Uses the Commander active (asking about Pancasona if a Kerbau Ngamuk charge would kill a Patih).</summary>
+        IEnumerator CommanderCast(int[] targets)
+        {
+            bool wasBusy = Busy;
+            Busy = true;
+            boardView.ClearDestinations();
+            var caster = Board.ToMove;
+            var enemy = Board.Other(caster);
+            if (rules.CanUsePancasona(Board, enemy) && rules.CommanderKillsPatih(Board, targets, enemy))
+                yield return AskPancasona(enemy);
+
+            var result = rules.CastCommander(Board, targets);
+            Debug.Log($"[Pamor] {caster}{(Mode == MatchMode.VsAi && caster == AiSide ? " (AI)" : "")} commander {CommanderBook.ActiveName(result.Active.Value)}"
+                      + (targets.Length > 0 ? " on " + string.Join(",", targets.Select(BoardGraph.Name)) : "")
+                      + (result.CapturedPieces.Count > 0 ? $" [{string.Join(",", result.CapturedPieces.Select(p => p.Role.ToString()))}]" : ""));
+            hud.NudgeHint(CommanderBook.ActiveName(result.Active.Value).ToUpperInvariant() + "!");
+            hud.FlashAccent();
+            yield return boardView.PlayCast(result);
+            if (result.PatihRevived >= 0) boardView.Build(Board);
+            boardView.RefreshRoles(Board, Viewer);
+            hud.SetCounts(Board.CountPieces(Side.Hitam), Board.CountPieces(Side.Merah));
+            hud.SetTenaga(Board.Tenaga(Side.Hitam), Board.Tenaga(Side.Merah));
+            Busy = wasBusy;
+            if (CheckEnd()) yield break;
+            RefreshTurnHints();
+            RefreshCommanderPanel();
+        }
+
+        IEnumerator AskPancasona(Side side)
+        {
+            bool use;
+            if (Mode == MatchMode.VsAi && side == AiSide) use = true;
+            else
+            {
+                pancasonaAnswer = null;
+                hud.ShowPancasonaPrompt(side, true);
+                while (pancasonaAnswer == null) yield return null;
+                hud.ShowPancasonaPrompt(side, false);
+                use = pancasonaAnswer.Value;
+            }
+            if (use) { rules.UsePancasona(Board, side); Debug.Log($"[Pamor] {side} uses Pancasona"); }
+        }
+
+        /// <summary>Ends the match if someone has won or it's a draw; true if it ended.</summary>
+        bool CheckEnd()
+        {
+            Winner = rules.Winner(Board);
+            IsDraw = !Winner.HasValue && rules.IsDraw(Board);
+            if (!Winner.HasValue && !IsDraw) return false;
+            Debug.Log($"[Pamor] {(IsDraw ? "draw" : Winner + " wins")} after {MovesPlayed} moves");
+            boardView.RefreshRoles(Board, Viewer, revealAll: true);
+            hud.HideCommander();
+            hud.HideAjian();
+            EnterState(GameState.Ended);
+            StartCoroutine(hud.PlayEnd(EndBanner(), MovesPlayed));
+            return true;
         }
 
         /// <summary>Before a move resolves: if it would kill a Patih whose side can afford Pancasona, that side decides.</summary>
@@ -279,6 +394,7 @@ namespace Pamor
             selected = null;
             targeting = false;
             hud.HideAjian();
+            hud.HideCommander();
             yield return OfferPancasona(move);
             var result = rules.Apply(Board, move);
             MovesPlayed++;
@@ -296,6 +412,7 @@ namespace Pamor
             hud.SetTenaga(Board.Tenaga(Side.Hitam), Board.Tenaga(Side.Merah));
             bool patihFell = result.CapturedPieces.Any(p => p.Role == Role.Patih) || (result.Burned >= 0 && result.BurnedPiece.Role == Role.Patih);
             string note = result.PatihRevived >= 0 ? "PANCASONA! PATIH HIDUP LAGI"
+                        : result.Guarded.Count > 0 ? "PENDEKAR JAKA TINGKIR SELAMAT"
                         : result.ExtraMove ? "SAIPI ANGIN: GERAK SEKALI LAGI"
                         : patihFell ? "PATIH GUGUR!"
                         : result.Burned >= 0 ? "DIBAKAR! TIDAK MAKAN"
@@ -348,19 +465,78 @@ namespace Pamor
             setupSide = side;
             setupSelected = null;
             Board = Board.CreateStandard(FormationOf(Side.Hitam), FormationOf(Side.Merah));
+            ApplyCommandersAndBlockers(Board);
             boardView.Build(Board);
             boardView.RefreshRoles(Board, side);
             boardView.ClearMustCapture();
             cameraRig.FaceSide(side);
-            hud.SetSetup(side, "KETUK DUA BIDAKMU UNTUK MENUKAR POSISI");
+            hud.SetSetup(side, commanders[SideIndex(side)] == Commander.Sangkuriang
+                ? "TUKAR BIDAK · KETUK TITIK TENGAH UNTUK 2 PENGHALANG"
+                : "KETUK DUA BIDAKMU UNTUK MENUKAR POSISI");
             hud.SetRoleInfo("Ketuk bidakmu untuk melihat perannya.");
             EnterState(GameState.Setup);
+        }
+
+        // ---------- Commander select
+
+        readonly Commander?[] commanders = new Commander?[2];
+        readonly List<int>[] blockers = { new List<int>(), new List<int>() };
+
+        void BeginCommanderSelect(Side side)
+        {
+            setupSide = side;
+            hud.SetCommanderSelect(side);
+            EnterState(GameState.CommanderSelect);
+        }
+
+        public void ChooseCommander(Commander c)
+        {
+            if (State != GameState.CommanderSelect) return;
+            commanders[SideIndex(setupSide)] = c;
+            if (c != Commander.Sangkuriang) blockers[SideIndex(setupSide)].Clear();
+            Debug.Log($"[Pamor] {setupSide} chooses {CommanderBook.Name(c)}");
+            BeginSetup(setupSide);
+        }
+
+        /// <summary>The AI's Commander: random each match; a Sangkuriang AI drops its 2 blockers on random free centre points.</summary>
+        void PickAiCommander()
+        {
+            var rng = new System.Random();
+            var c = CommanderBook.All[rng.Next(CommanderBook.All.Length)];
+            commanders[SideIndex(AiSide)] = c;
+            var list = blockers[SideIndex(AiSide)];
+            list.Clear();
+            if (c != Commander.Sangkuriang) return;
+            var centre = Board.AllPoints().Where(p => BoardGraph.Xs[p] == 4 && !blockers[SideIndex(Board.Other(AiSide))].Contains(p)).OrderBy(_ => rng.Next()).ToList();
+            list.AddRange(centre.Take(CommanderBook.SangkuriangBlockers));
+        }
+
+        void ApplyCommandersAndBlockers(Board board)
+        {
+            foreach (var side in new[] { Side.Hitam, Side.Merah })
+            {
+                board.SetCommander(side, commanders[SideIndex(side)]);
+                foreach (var p in blockers[SideIndex(side)]) board.SetBlocker(p, true);
+            }
+            hud.SetCommanders(commanders[0], commanders[1]);
         }
 
         /// <summary>Tap during Fase Susun: select one of your pieces, then another to swap their roles.</summary>
         public void SetupTap(int point)
         {
             if (State != GameState.Setup) return;
+            // Sangkuriang: tap a free centre point to place or lift one of 2 blockers.
+            if (commanders[SideIndex(setupSide)] == Commander.Sangkuriang && BoardGraph.Xs[point] == 4 && !Board[point].Exists)
+            {
+                var mine = blockers[SideIndex(setupSide)];
+                bool theirs = blockers[SideIndex(Board.Other(setupSide))].Contains(point);
+                if (mine.Contains(point)) mine.Remove(point);
+                else if (!theirs && mine.Count < CommanderBook.SangkuriangBlockers) mine.Add(point);
+                else { hud.NudgeHint("PENGHALANG MAKS. 2"); return; }
+                Board.SetBlocker(point, mine.Contains(point));
+                boardView.RefreshRoles(Board, setupSide);
+                return;
+            }
             if (Board.Owner(point) != setupSide) { SetupDeselect(); return; }
             hud.SetRoleInfo(RoleInfo(Board[point].Role));
             if (!setupSelected.HasValue) { setupSelected = point; boardView.PieceAt(point)?.SetSelected(true); return; }
@@ -396,11 +572,12 @@ namespace Pamor
             if (State != GameState.Setup) return;
             if (!FormationOf(setupSide).IsValid(setupSide, out var error)) { hud.SetSetup(setupSide, error); return; }
             SetupDeselect();
-            if (Mode == MatchMode.LocalPvP && setupSide == Side.Hitam) { ShowHandoff(Side.Merah, () => BeginSetup(Side.Merah)); return; }
+            if (Mode == MatchMode.LocalPvP && setupSide == Side.Hitam) { ShowHandoff(Side.Merah, () => BeginCommanderSelect(Side.Merah)); return; }
             ResetMatch();
             if (Mode == MatchMode.LocalPvP) { ShowHandoff(Side.Hitam, BeginTurnView); return; }
             cameraRig.FaceSide(Viewer);
             EnterState(GameState.Playing);
+            RefreshTurnHints();
             if (IsAiTurn) turnRoutine = StartCoroutine(AiTurn());
         }
 
@@ -464,7 +641,13 @@ namespace Pamor
                 yield break;
             }
             var plan = task.Result;
-            if (plan.Caster >= 0 && rules.CastBlocker(Board, plan.Caster) == null)
+            if (plan.CommanderTargets != null && rules.CommanderBlocker(Board) == null)
+            {
+                yield return CommanderCast(plan.CommanderTargets);
+                if (State != GameState.Playing) yield break; // the active won the game
+                yield return new WaitForSeconds(0.5f);
+            }
+            else if (plan.Caster >= 0 && rules.CastBlocker(Board, plan.Caster) == null)
             {
                 DoCast(plan.Caster, plan.Target);
                 yield return new WaitForSeconds(0.9f);
@@ -487,6 +670,7 @@ namespace Pamor
             else label = Board.ToMove == Side.Hitam ? "GILIRAN HITAM" : "GILIRAN MERAH";
             string hint = IsAiTurn ? "AI BERPIKIR..." : mustCapture ? "WAJIB MAKAN!" : "";
             hud.SetTurn(Board.ToMove, label, hint);
+            RefreshCommanderPanel();
             if (mustCapture && !IsAiTurn) boardView.ShowMustCapture(rules.Captures(Board).Select(m => m.From).Distinct());
             else boardView.ClearMustCapture();
         }
@@ -500,8 +684,9 @@ namespace Pamor
             Busy = false;
             AiThinking = false;
             // Each player's Fase Susun arrangement; the AI arranges itself at random every match.
-            if (Mode == MatchMode.VsAi) formations[SideIndex(AiSide)] = Formation.Random(AiSide, new System.Random());
+            if (Mode == MatchMode.VsAi) { formations[SideIndex(AiSide)] = Formation.Random(AiSide, new System.Random()); PickAiCommander(); }
             Board = Board.CreateStandard(FormationOf(Side.Hitam), FormationOf(Side.Merah));
+            ApplyCommandersAndBlockers(Board);
             MovesPlayed = 0;
             Winner = null;
             IsDraw = false;
@@ -545,8 +730,8 @@ namespace Pamor
             Time.timeScale = 1f;
             Mode = mode;
             ResetMatch();
-            // Starting (or restarting) a match always goes through Fase Susun, keeping last match's arrangement.
-            if (next == GameState.Playing) BeginSetup(Side.Hitam);
+            // Starting (or restarting) a match: Commander, then Fase Susun (last match's arrangement is kept).
+            if (next == GameState.Playing) BeginCommanderSelect(Side.Hitam);
             else EnterState(next);
             yield return hud.FadeIn();
             transitioning = false;

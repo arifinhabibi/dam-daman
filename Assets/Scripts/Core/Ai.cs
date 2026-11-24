@@ -88,7 +88,35 @@ namespace Pamor.Core
         {
             public int Caster = -1;
             public int Target = -1;
+            /// <summary>Targets for the Commander active, if the AI uses it this turn (instead of an ajian).</summary>
+            public int[] CommanderTargets;
             public Move Move;
+        }
+
+        /// <summary>Candidate target lists for the side to move's Commander active (capped, Kerbau only when it takes something).</summary>
+        List<int[]> CommanderOptions(Board board)
+        {
+            var options = new List<int[]>();
+            if (rules.CommanderBlocker(board) != null) return options;
+            var c = board.CommanderOf(board.ToMove).Value;
+            int need = CommanderBook.TargetCount(c);
+            if (need == 0) { options.Add(new int[0]); return options; }
+            foreach (var first in rules.CommanderTargets(board, new int[0]))
+            {
+                if (need == 1) { options.Add(new[] { first }); continue; }
+                foreach (var second in rules.CommanderTargets(board, new[] { first }))
+                {
+                    if (c == Commander.JakaTingkir)
+                    {
+                        // Only charges that run through an enemy are worth trying.
+                        var trial = board.Clone();
+                        if (rules.CastCommander(trial, new[] { first, second }).CapturedPieces.Count == 0) continue;
+                    }
+                    options.Add(new[] { first, second });
+                    if (options.Count >= 40) return options;
+                }
+            }
+            return options;
         }
 
         /// <summary>
@@ -104,7 +132,8 @@ namespace Pamor.Core
                 if (board.Owner(p) == board.ToMove && rules.CastBlocker(board, p) == null)
                     foreach (var t in rules.CastTargets(board, p)) options.Add((p, t));
 
-            if (options.Count > 0)
+            var commanderOptions = CommanderOptions(board);
+            if (options.Count > 0 || commanderOptions.Count > 0)
             {
                 var probe = new Ai(Math.Max(1, Depth - 2), 0, rules, rng.Next());
                 if (probe.ChooseMove(board) != null)
@@ -117,11 +146,23 @@ namespace Pamor.Core
                         if (probe.ChooseMove(trial) == null) continue;
                         if (probe.LastScore > bar) { bar = probe.LastScore; plan.Caster = caster; plan.Target = target; }
                     }
+                    foreach (var targets in commanderOptions)
+                    {
+                        var trial = board.Clone();
+                        rules.CastCommander(trial, targets);
+                        int score;
+                        if (rules.Winner(trial) == trial.ToMove) score = Win;
+                        else if (probe.ChooseMove(trial) == null) continue;
+                        else score = probe.LastScore;
+                        if (score > bar) { bar = score; plan.Caster = -1; plan.Target = -1; plan.CommanderTargets = targets; }
+                    }
                 }
             }
 
             var final = board;
-            if (plan.Caster >= 0) { final = board.Clone(); rules.Cast(final, plan.Caster, plan.Target); }
+            if (plan.CommanderTargets != null) { final = board.Clone(); rules.CastCommander(final, plan.CommanderTargets); }
+            else if (plan.Caster >= 0) { final = board.Clone(); rules.Cast(final, plan.Caster, plan.Target); }
+            if (rules.Winner(final) != null) { plan.Move = rules.LegalMoves(final).Count > 0 ? rules.LegalMoves(final)[0] : null; return plan; }
             plan.Move = ChooseMove(final);
             return plan;
         }

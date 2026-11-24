@@ -83,6 +83,18 @@ namespace Pamor.Tests
         }
 
         [Test]
+        public void UsesKerbauNgamuk_ToKillThePatih()
+        {
+            var b = Board.CreateEmpty();
+            H(b, "c3"); M(b, "d3"); M(b, "e3", Role.Patih); H(b, "a1", Role.Patih); M(b, "i5"); M(b, "h4");
+            b.SetCommander(Side.Hitam, Commander.JakaTingkir);
+            b.SetTenaga(Side.Hitam, 5);
+            var plan = new Ai(2, seed: 1).ChooseTurn(b);
+            Assert.IsNotNull(plan.CommanderTargets, "should charge");
+            CollectionAssert.AreEqual(new[] { P("c3"), P("f3") }, plan.CommanderTargets);
+        }
+
+        [Test]
         public void ChooseTurn_WithNoTenaga_JustMoves()
         {
             var b = Board.CreateStandard();

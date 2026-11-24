@@ -66,10 +66,14 @@ namespace Pamor.Core
             var a = AjianBook.For(piece.Role);
             if (AjianBook.IsReaction(a)) return board.PancasonaUsed(piece.Side) ? "Pancasona sudah dipakai." : "Pancasona dipakai saat Patih akan gugur: kamu akan ditanya.";
             if (board.CooldownLeft(piece.Side, a) > 0) return $"Jeda {board.CooldownLeft(piece.Side, a)} giliran lagi.";
-            if (board.Tenaga(piece.Side) < AjianBook.Cost(a)) return $"Tenaga Dalam kurang ({board.Tenaga(piece.Side)}/{AjianBook.Cost(a)}).";
+            if (board.Tenaga(piece.Side) < AjianCost(board, piece.Side, a)) return $"Tenaga Dalam kurang ({board.Tenaga(piece.Side)}/{AjianCost(board, piece.Side, a)}).";
             if (CastTargets(board, caster).Count == 0) return "Tidak ada target.";
             return null;
         }
+
+        /// <summary>An ajian's cost for this side (Calon Arang's Santet is 1 cheaper).</summary>
+        public static int AjianCost(Board board, Side side, Ajian a) =>
+            AjianBook.Cost(a) - (a == Ajian.Santet && board.CommanderOf(side) == Commander.CalonArang ? 1 : 0);
 
         /// <summary>Valid targets for the caster's ajian: the caster itself, or enemy pieces in range for Santet.</summary>
         public List<int> CastTargets(Board board, int caster)
@@ -135,7 +139,7 @@ namespace Pamor.Core
                     break;
             }
 
-            board.SetTenaga(side, board.Tenaga(side) - AjianBook.Cost(a));
+            board.SetTenaga(side, board.Tenaga(side) - AjianCost(board, side, a));
             // +1: the casting turn's own end ticks once, so N full turns are skipped afterwards.
             board.SetCooldown(side, a, AjianBook.CooldownTurns(a) + 1);
             board.CastThisTurn = true;
@@ -185,7 +189,7 @@ namespace Pamor.Core
                 {
                     if (BoardGraph.RayDirs[p][r] != ((int)side, 0)) continue;
                     int to = rays[r][0];
-                    if (!board.IsEmpty(to)) break;
+                    if (!board.IsFree(to)) break;
                     board.MovePiece(p, to);
                     result.Shifts.Add((p, to));
                     if (BoardGraph.Xs[to] == Board.PromotionX(side))
@@ -257,6 +261,15 @@ namespace Pamor.Core
             foreach (var cap in move.Captured)
             {
                 var victim = board[cap];
+                if (victim.GuardOnce)
+                {
+                    // Jaka Tingkir's Pendekar shrugs off the first hit.
+                    victim.GuardOnce = false;
+                    victim.Revealed = true;
+                    board.Set(cap, victim);
+                    result.Guarded.Add(cap);
+                    continue;
+                }
                 result.CapturedPieces.Add(victim);
                 if (victim.Role == Role.Senopati && !victim.IsDam) result.SenopatiFell.Add(victim.Side);
                 board.Clear(cap);
@@ -306,42 +319,28 @@ namespace Pamor.Core
             // Dukun shield: a Dukun that just moved shields its most important neighbour for the opponent's turn.
             if (board[move.To].Exists && board[move.To].Role == Role.Dukun && !board[move.To].IsDam)
             {
-                int best = -1, bestRank = -1;
+                // Most important neighbours first; Lutung Kasarung's Dukun shields two.
+                var allies = new List<int>();
                 foreach (var ray in BoardGraph.Rays[move.To])
-                {
-                    int n = ray[0];
-                    if (board.Owner(n) != mover) continue;
-                    int rank = RoleRules.Importance(board[n]);
-                    if (rank > bestRank) { bestRank = rank; best = n; }
-                }
+                    if (board.Owner(ray[0]) == mover) allies.Add(ray[0]);
+                allies.Sort((a, b) => RoleRules.Importance(board[b]).CompareTo(RoleRules.Importance(board[a])));
+                int best = allies.Count > 0 ? allies[0] : -1;
+                int second = board.CommanderOf(mover) == Commander.LutungKasarung && allies.Count > 1 ? allies[1] : -1;
                 if (best >= 0)
                 {
-                    board.SetShielded(mover, best);
+                    board.SetShields(mover, best, second);
                     result.Shield = best;
+                    result.Shield2 = second;
                     var dukun = board[move.To];
                     if (!dukun.Revealed) { dukun.Revealed = true; board.Set(move.To, dukun); result.RevealedMover = true; }
                 }
             }
             // A shield follows its piece only while it stays put: if the shielded piece moved, it's gone.
-            if (board.Shielded(mover) == move.From) board.SetShielded(mover, -1);
+            board.DropShield(mover, move.From);
 
-            // Tenaga Dalam: +2 per captured piece.
-            if (move.IsCapture) board.SetTenaga(mover, board.Tenaga(mover) + AjianBook.TenagaPerCapture * move.Captured.Count);
+            GainFromCaptures(board, mover, result.CapturedPieces.Count);
 
-            // Pancasona: a Patih that died in this move while armed comes back at its start point.
-            foreach (var side in new[] { Side.Hitam, Side.Merah })
-            {
-                if (!board.PancasonaArmed(side) || board.Find(side, Role.Patih) >= 0) continue;
-                int spot = board.IsEmpty(board.PatihStart(side)) ? board.PatihStart(side) : -1;
-                if (spot < 0) foreach (var p in Formation.StartPoints(side)) if (board.IsEmpty(p)) { spot = p; break; }
-                board.DisarmPancasona(side);
-                if (spot < 0) continue;
-                var patih = Piece.Of(side, Role.Patih);
-                patih.Revealed = true;
-                board.Set(spot, patih);
-                result.PatihRevived = spot;
-            }
-            foreach (var side in new[] { Side.Hitam, Side.Merah }) board.DisarmPancasona(side);
+            result.PatihRevived = RevivePatihs(board);
 
             bool bonus = move.Captured.Count >= ComboCaptures && !board.InBonusMove;
 
@@ -378,8 +377,257 @@ namespace Pamor.Core
         /// The mover's turn is over: capture block and the opponent's shield expire, Tenaga Dalam grows,
         /// cooldowns tick, and status timers run (protection counts opponent turns, Santet own turns).
         /// </summary>
+        /// <summary>Pancasona: a Patih that just died while armed comes back at its start point. Arming lasts one action.</summary>
+        static int RevivePatihs(Board board)
+        {
+            int revived = -1;
+            foreach (var side in new[] { Side.Hitam, Side.Merah })
+            {
+                if (!board.PancasonaArmed(side) || board.Find(side, Role.Patih) >= 0) continue;
+                int spot = board.IsFree(board.PatihStart(side)) ? board.PatihStart(side) : -1;
+                if (spot < 0) foreach (var p in Formation.StartPoints(side)) if (board.IsFree(p)) { spot = p; break; }
+                if (spot < 0) continue;
+                var patih = Piece.Of(side, Role.Patih);
+                patih.Revealed = true;
+                board.Set(spot, patih);
+                revived = spot;
+            }
+            foreach (var side in new[] { Side.Hitam, Side.Merah }) board.DisarmPancasona(side);
+            return revived;
+        }
+
+        // ---------- Commander actives
+
+        /// <summary>Why the side to move can't use its Commander active now, or null.</summary>
+        public string CommanderBlocker(Board board)
+        {
+            var side = board.ToMove;
+            var c = board.CommanderOf(side);
+            if (!c.HasValue) return "Tidak ada Commander.";
+            if (board.CastThisTurn) return "Sudah memakai ajian giliran ini.";
+            if (board.ForcedPiece >= 0) return "Tidak bisa saat Saipi Angin.";
+            if (board.CommanderCooldownLeft(side) > 0) return $"Jeda {board.CommanderCooldownLeft(side)} giliran lagi.";
+            int cost = CommanderBook.ActiveCost(c.Value);
+            if (board.Tenaga(side) < cost) return $"Tenaga Dalam kurang ({board.Tenaga(side)}/{cost}).";
+            switch (c.Value)
+            {
+                case Commander.CalonArang:
+                    if (TeluhVictims(board, side).Count == 0) return "Tidak ada target.";
+                    break;
+                case Commander.Sawerigading:
+                    var first = CommanderTargets(board, new int[0]);
+                    if (first.Count == 0 || !first.Exists(p => CommanderTargets(board, new[] { p }).Count > 0)) return "Butuh 2 bidak yang bisa menyeberang.";
+                    break;
+                default:
+                    if (CommanderTargets(board, new int[0]).Count == 0) return "Tidak ada target.";
+                    break;
+            }
+            return null;
+        }
+
+        /// <summary>Valid choices for the next target of the Commander active, given the ones already chosen.</summary>
+        public List<int> CommanderTargets(Board board, IReadOnlyList<int> chosen)
+        {
+            var side = board.ToMove;
+            var result = new List<int>();
+            var c = board.CommanderOf(side);
+            if (!c.HasValue) return result;
+            switch (c.Value)
+            {
+                case Commander.Sangkuriang:
+                    for (int p = 0; p < BoardGraph.PointCount; p++) if (board.IsFree(p)) result.Add(p);
+                    break;
+                case Commander.SiPitung:
+                    for (int p = 0; p < BoardGraph.PointCount; p++)
+                        if (board.Owner(p) == side && board[p].Role == Role.TelikSandi && board[p].Revealed) result.Add(p);
+                    break;
+                case Commander.JakaTingkir:
+                    if (chosen.Count == 0)
+                    {
+                        for (int p = 0; p < BoardGraph.PointCount; p++)
+                            if (board.Owner(p) == side && board[p].FrozenTurns == 0 && ChargeEnds(board, p).Count > 0) result.Add(p);
+                    }
+                    else result.AddRange(ChargeEnds(board, chosen[0]));
+                    break;
+                case Commander.Sawerigading:
+                    var view = board;
+                    if (chosen.Count > 0)
+                    {
+                        view = board.Clone();
+                        view.MovePiece(chosen[0], Mirror(chosen[0]));
+                    }
+                    for (int p = 0; p < BoardGraph.PointCount; p++)
+                    {
+                        if (view.Owner(p) != side || (chosen.Count > 0 && p == Mirror(chosen[0]))) continue;
+                        int m = Mirror(p);
+                        if (m >= 0 && m != p && view.IsFree(m)) result.Add(p);
+                    }
+                    break;
+                case Commander.LutungKasarung:
+                    for (int p = 0; p < BoardGraph.PointCount; p++)
+                        if (board.Owner(p) == side && board[p].Role == Role.Prajurit && !board[p].IsDam) result.Add(p);
+                    break;
+            }
+            return result;
+        }
+
+        /// <summary>Layar Pinisi's crossing: the same column on the opposite edge (row y becomes 4 - y).</summary>
+        public static int Mirror(int p) => BoardGraph.At(BoardGraph.Xs[p], BoardGraph.Height - 1 - BoardGraph.Ys[p]);
+
+        /// <summary>Where a Kerbau Ngamuk charge from this piece may end: free points up to 3 along a line, through enemies only.</summary>
+        public List<int> ChargeEnds(Board board, int from)
+        {
+            var ends = new List<int>();
+            var side = board[from].Side;
+            foreach (var ray in BoardGraph.Rays[from])
+                for (int k = 0; k < ray.Length && k < CommanderBook.KerbauReach; k++)
+                {
+                    int q = ray[k];
+                    if (board.IsBlocked(q)) break;
+                    if (board.IsFree(q)) { ends.Add(q); continue; }
+                    var t = board[q];
+                    if (t.Side == side || t.Untouchable || board.IsShielded(q)) break;
+                }
+            return ends;
+        }
+
+        static List<int> TeluhVictims(Board board, Side side)
+        {
+            var enemies = new List<int>();
+            for (int p = 0; p < BoardGraph.PointCount; p++)
+                if (board.Owner(p) == Board.Other(side) && board[p].HiddenTurns == 0) enemies.Add(p);
+            // Deterministic "random": the same position always picks the same pieces (so the AI can plan).
+            var rng = new System.Random(board.Ply * 7919 + (int)side * 104729);
+            for (int i = enemies.Count - 1; i > 0; i--) { int j = rng.Next(i + 1); (enemies[i], enemies[j]) = (enemies[j], enemies[i]); }
+            return enemies.GetRange(0, System.Math.Min(3, enemies.Count));
+        }
+
+        /// <summary>Uses the side to move's Commander active with the chosen targets. Doesn't use up the move.</summary>
+        public CastResult CastCommander(Board board, IReadOnlyList<int> targets)
+        {
+            var blocker = CommanderBlocker(board);
+            if (blocker != null) throw new System.InvalidOperationException(blocker);
+            var side = board.ToMove;
+            var c = board.CommanderOf(side).Value;
+            int need = CommanderBook.TargetCount(c);
+            if (targets.Count != need) throw new System.InvalidOperationException($"{CommanderBook.ActiveName(c)} needs {need} target(s).");
+            for (int i = 0; i < need; i++)
+                if (!CommanderTargets(board, new List<int>(System.Linq.Enumerable.Take(targets, i))).Contains(targets[i]))
+                    throw new System.InvalidOperationException("Target tidak sah.");
+
+            if (AutoPancasona && c == Commander.JakaTingkir)
+            {
+                var enemy = Board.Other(side);
+                if (CanUsePancasona(board, enemy) && CommanderKillsPatih(board, targets, enemy)) UsePancasona(board, enemy);
+            }
+
+            var result = new CastResult { Active = c, Caster = side, CasterPoint = need > 0 ? targets[0] : -1, Target = need > 0 ? targets[need - 1] : -1 };
+            switch (c)
+            {
+                case Commander.Sangkuriang:
+                {
+                    int p = targets[0];
+                    foreach (var q in new[] { p, BoardGraph.At(BoardGraph.Xs[p], BoardGraph.Ys[p] - 1), BoardGraph.At(BoardGraph.Xs[p], BoardGraph.Ys[p] + 1) })
+                        if (q >= 0 && board.IsFree(q)) { board.SetWall(q, side, 2); result.Walls.Add(q); }
+                    break;
+                }
+                case Commander.SiPitung:
+                {
+                    var t = board[targets[0]]; t.Revealed = false; board.Set(targets[0], t);
+                    break;
+                }
+                case Commander.CalonArang:
+                    foreach (var p in TeluhVictims(board, side))
+                    {
+                        var t = board[p]; t.FrozenTurns = System.Math.Max(t.FrozenTurns, 1); board.Set(p, t);
+                        result.Frozen.Add(p);
+                    }
+                    break;
+                case Commander.JakaTingkir:
+                    Charge(board, targets[0], targets[1], side, result);
+                    break;
+                case Commander.Sawerigading:
+                    foreach (var p in targets)
+                    {
+                        int m = Mirror(p);
+                        board.MovePiece(p, m);
+                        result.Shifts.Add((p, m));
+                    }
+                    break;
+                case Commander.LutungKasarung:
+                {
+                    var t = board[targets[0]]; t.IsDam = true; t.DamIdle = 0; t.Revealed = true; board.Set(targets[0], t);
+                    result.Promoted.Add(targets[0]);
+                    break;
+                }
+            }
+
+            board.SetTenaga(side, board.Tenaga(side) - CommanderBook.ActiveCost(c));
+            board.SetCommanderCooldown(side, CommanderBook.Cooldown + 1);
+            board.CastThisTurn = true;
+            return result;
+        }
+
+        /// <summary>Kerbau Ngamuk: the piece charges along a line to the end point, taking every enemy it runs through.</summary>
+        void Charge(Board board, int from, int end, Side side, CastResult result)
+        {
+            foreach (var ray in BoardGraph.Rays[from])
+            {
+                int idx = System.Array.IndexOf(ray, end);
+                if (idx < 0 || idx >= CommanderBook.KerbauReach) continue;
+                for (int k = 0; k < idx; k++)
+                {
+                    int q = ray[k];
+                    var victim = board[q];
+                    if (!victim.Exists) continue;
+                    if (victim.GuardOnce) { victim.GuardOnce = false; victim.Revealed = true; board.Set(q, victim); result.Guarded.Add(q); continue; }
+                    result.Captured.Add(q);
+                    result.CapturedPieces.Add(victim);
+                    if (victim.Role == Role.Senopati && !victim.IsDam) board.SetPrajuritCaptureBlocked(victim.Side, true);
+                    board.Clear(q);
+                }
+                break;
+            }
+            board.MovePiece(from, end);
+            var moved = board[end];
+            moved.Revealed = true;
+            if (RoleRules.Promotes(moved) && BoardGraph.Xs[end] == Board.PromotionX(side)) { moved.IsDam = true; result.Promoted.Add(end); }
+            board.Set(end, moved);
+            result.Shifts.Add((from, end));
+            GainFromCaptures(board, side, result.CapturedPieces.Count);
+            result.PatihRevived = RevivePatihs(board);
+        }
+
+        /// <summary>This Commander active would kill the given side's Patih (Kerbau Ngamuk).</summary>
+        public bool CommanderKillsPatih(Board board, IReadOnlyList<int> targets, Side patihSide)
+        {
+            if (board.CommanderOf(board.ToMove) != Commander.JakaTingkir || targets.Count < 2) return false;
+            var clone = board.Clone();
+            var r = new CastResult();
+            Charge(clone, targets[0], targets[1], clone.ToMove, r);
+            foreach (var p in r.CapturedPieces) if (p.Side == patihSide && p.Role == Role.Patih) return true;
+            return false;
+        }
+
+        /// <summary>Tenaga Dalam: +2 per captured piece; Si Pitung also steals 1 from the opponent per piece.</summary>
+        static void GainFromCaptures(Board board, Side mover, int captured)
+        {
+            if (captured <= 0) return;
+            board.SetTenaga(mover, board.Tenaga(mover) + AjianBook.TenagaPerCapture * captured);
+            if (board.CommanderOf(mover) == Commander.SiPitung)
+            {
+                var victim = Board.Other(mover);
+                int stolen = System.Math.Min(captured, board.Tenaga(victim));
+                board.SetTenaga(victim, board.Tenaga(victim) - stolen);
+                board.SetTenaga(mover, board.Tenaga(mover) + stolen);
+            }
+        }
+
         static void EndTurn(Board board, Side mover)
         {
+            board.Ply++;
+            board.TickWalls(mover);
+            if (board.CommanderCooldownLeft(mover) > 0) board.SetCommanderCooldown(mover, board.CommanderCooldownLeft(mover) - 1);
             board.SetPrajuritCaptureBlocked(mover, false);
             board.SetShielded(Board.Other(mover), -1);
             board.SetTenaga(mover, board.Tenaga(mover) + AjianBook.TenagaPerTurn);
@@ -419,6 +667,8 @@ namespace Pamor.Core
         {
             var piece = board[from];
             int range = FlyingDam || !piece.IsDam ? RoleRules.StepRange(piece) : 1;
+            // Sawerigading: pieces on the edge rows go one point farther.
+            if (!piece.IsDam && board.CommanderOf(piece.Side) == Commander.Sawerigading && (BoardGraph.Ys[from] == 0 || BoardGraph.Ys[from] == BoardGraph.Height - 1)) range++;
             var rays = BoardGraph.Rays[from];
             for (int r = 0; r < rays.Length; r++)
             {
@@ -426,7 +676,7 @@ namespace Pamor.Core
                 var ray = rays[r];
                 for (int k = 0; k < ray.Length && k < range; k++)
                 {
-                    if (!board.IsEmpty(ray[k])) break;
+                    if (!board.IsFree(ray[k])) break;
                     into.Add(new Move(new[] { from, ray[k] }, new int[0]));
                 }
             }
@@ -458,7 +708,7 @@ namespace Pamor.Core
                 if (flying) while (i < ray.Length && IsEmpty(board, ray[i], origin)) i++;
                 if (i >= ray.Length) continue;
                 int target = ray[i];
-                if (IsEmpty(board, target, origin)) continue;
+                if (IsEmpty(board, target, origin) || !board[target].Exists) continue; // free, or a blocker/wall
                 if (board.Owner(target) == piece.Side || captured.Contains(target) || board.IsShielded(target) || board[target].Untouchable) continue;
 
                 for (int j = i + 1; j < ray.Length && IsEmpty(board, ray[j], origin); j++)
@@ -478,6 +728,6 @@ namespace Pamor.Core
         }
 
         // The moving piece has left its start point, so that point counts as empty during the chain.
-        static bool IsEmpty(Board board, int p, int origin) => p == origin || board.IsEmpty(p);
+        static bool IsEmpty(Board board, int p, int origin) => p == origin || board.IsFree(p);
     }
 }

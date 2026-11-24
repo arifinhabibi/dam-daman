@@ -11,7 +11,51 @@ namespace Pamor.Core
     {
         readonly Piece[] cells = new Piece[BoardGraph.PointCount];
         readonly bool[] patihPlaced = new bool[2];
-        readonly int[] shielded = { -1, -1 };
+        // Two shield slots per side (Lutung Kasarung's Dukun shields two pieces).
+        readonly int[,] shields = { { -1, -1 }, { -1, -1 } };
+        readonly int[] commanders = { -1, -1 };
+        readonly int[] commanderCooldown = new int[2];
+        readonly bool[] blocked = new bool[BoardGraph.PointCount];
+        readonly int[] wallTurns = new int[BoardGraph.PointCount];
+        readonly int[] wallOwner = new int[BoardGraph.PointCount];
+
+        /// <summary>Turns played so far; seeds the deterministic "random" picks (Teluh Massal).</summary>
+        public int Ply { get; internal set; }
+
+        public Commander? CommanderOf(Side side) => commanders[I(side)] < 0 ? (Commander?)null : (Commander)commanders[I(side)];
+
+        /// <summary>Sets a side's Commander; Jaka Tingkir's passive guards that side's Pendekar from here on.</summary>
+        public void SetCommander(Side side, Commander? c)
+        {
+            commanders[I(side)] = c.HasValue ? (int)c.Value : -1;
+            for (int p = 0; p < cells.Length; p++)
+            {
+                var piece = cells[p];
+                if (!piece.Exists || piece.Side != side || piece.Role != Role.Pendekar) continue;
+                piece.GuardOnce = c == Commander.JakaTingkir;
+                cells[p] = piece;
+            }
+        }
+
+        public int CommanderCooldownLeft(Side side) => commanderCooldown[I(side)];
+        internal void SetCommanderCooldown(Side side, int turns) => commanderCooldown[I(side)] = turns;
+
+        /// <summary>A Sangkuriang blocker for the whole match, or a Perahu Semalam wall still standing.</summary>
+        public bool IsBlocked(int p) => blocked[p] || wallTurns[p] > 0;
+        public bool IsPermanentBlocker(int p) => blocked[p];
+        public bool IsWall(int p) => wallTurns[p] > 0;
+        public void SetBlocker(int p, bool on) => blocked[p] = on;
+        internal void SetWall(int p, Side owner, int turns) { wallTurns[p] = turns; wallOwner[p] = I(owner); }
+
+        /// <summary>Walls last a number of the opponent's turns: tick the walls the given side's opponent raised.</summary>
+        internal void TickWalls(Side endedTurn)
+        {
+            for (int p = 0; p < wallTurns.Length; p++)
+                if (wallTurns[p] > 0 && wallOwner[p] != I(endedTurn)) wallTurns[p]--;
+        }
+
+        /// <summary>Nothing stands here: no piece, no blocker, no wall.</summary>
+        public bool IsFree(int p) => !cells[p].Exists && !IsBlocked(p);
         readonly bool[] noPrajuritCapture = new bool[2];
         readonly int[] tenaga = new int[2];
         readonly int[,] cooldowns = new int[2, 6];
@@ -65,10 +109,21 @@ namespace Pamor.Core
             cells[from] = default;
         }
 
-        /// <summary>The point the side's Dukun shields during the opponent's turn, or -1.</summary>
-        public int Shielded(Side side) => shielded[I(side)];
-        internal void SetShielded(Side side, int p) => shielded[I(side)] = p;
-        public bool IsShielded(int p) => cells[p].Exists && shielded[I(cells[p].Side)] == p;
+        /// <summary>The (first) point the side's Dukun shields during the opponent's turn, or -1.</summary>
+        public int Shielded(Side side) => shields[I(side), 0];
+        public int[] Shields(Side side) => new[] { shields[I(side), 0], shields[I(side), 1] };
+        internal void SetShielded(Side side, int p) { shields[I(side), 0] = p; shields[I(side), 1] = -1; }
+        internal void SetShields(Side side, int a, int b) { shields[I(side), 0] = a; shields[I(side), 1] = b; }
+        internal void DropShield(Side side, int p)
+        {
+            for (int k = 0; k < 2; k++) if (shields[I(side), k] == p) shields[I(side), k] = -1;
+        }
+        public bool IsShielded(int p)
+        {
+            if (!cells[p].Exists) return false;
+            int s = I(cells[p].Side);
+            return shields[s, 0] == p || shields[s, 1] == p;
+        }
 
         /// <summary>The side's Prajurit can't capture this turn (its Senopati died last turn).</summary>
         public bool PrajuritCaptureBlocked(Side side) => noPrajuritCapture[I(side)];
@@ -91,10 +146,15 @@ namespace Pamor.Core
 
         public Board Clone()
         {
-            var b = new Board { ToMove = ToMove, QuietMoves = QuietMoves, InBonusMove = InBonusMove, CastThisTurn = CastThisTurn, ForcedPiece = ForcedPiece };
+            var b = new Board { ToMove = ToMove, QuietMoves = QuietMoves, InBonusMove = InBonusMove, CastThisTurn = CastThisTurn, ForcedPiece = ForcedPiece, Ply = Ply };
             Array.Copy(cells, b.cells, cells.Length);
             Array.Copy(patihPlaced, b.patihPlaced, 2);
-            Array.Copy(shielded, b.shielded, 2);
+            Array.Copy(shields, b.shields, shields.Length);
+            Array.Copy(commanders, b.commanders, 2);
+            Array.Copy(commanderCooldown, b.commanderCooldown, 2);
+            Array.Copy(blocked, b.blocked, blocked.Length);
+            Array.Copy(wallTurns, b.wallTurns, wallTurns.Length);
+            Array.Copy(wallOwner, b.wallOwner, wallOwner.Length);
             Array.Copy(noPrajuritCapture, b.noPrajuritCapture, 2);
             Array.Copy(tenaga, b.tenaga, 2);
             Array.Copy(cooldowns, b.cooldowns, cooldowns.Length);

@@ -101,5 +101,13 @@ namespace Pamor.Core
         /// <summary>Pieces moved by the ajian (Gelar Supit Urang), as (from, to).</summary>
         public List<(int from, int to)> Shifts = new List<(int, int)>();
         public List<int> Promoted = new List<int>();
+        /// <summary>Set when this was a Commander active rather than a role ajian.</summary>
+        public Commander? Active;
+        public List<int> Captured = new List<int>();
+        public List<Piece> CapturedPieces = new List<Piece>();
+        public List<int> Guarded = new List<int>();
+        public List<int> Walls = new List<int>();
+        public List<int> Frozen = new List<int>();
+        public int PatihRevived = -1;
     }
 }

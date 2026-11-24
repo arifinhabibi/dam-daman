@@ -57,9 +57,17 @@ Per the GDD (one ajian per role, no Ajian Pamungkas; Dukun gets Santet, not Raja
 - Casting reveals the caster's role, except Panglimunan.
 - The AI considers casting each turn (shorter search with vs without each option; casts only when clearly better). Its search assumes Pancasona is always used when affordable and doesn't look ahead at future ajian.
 
-## Commanders (pending)
+## Commanders (built 2026-11-24)
 
-The GDD's six Commanders (with lore and synergies, added to GDD.md) are not built yet.
+Each player picks a Commander before Fase Susun (vs AI: the AI picks at random). The choice is public: both side panels show it. Line-board readings and choices to confirm:
+- **The Commander active shares the one-ability-per-turn limit with ajian**, costs Tenaga Dalam, doesn't use the move, and has a 3-turn cooldown (the GDD sets none).
+- **Sangkuriang:** passive: 2 blockers on free centre points (column e) during Fase Susun, for the whole match. Blockers and walls can't be entered, landed on, jumped or flown through. Active **Perahu Semalam (6):** pick a free point; it and the points directly above and below it (if free) become a wall for 2 opponent turns.
+- **Si Pitung:** passive: steals 1 Tenaga Dalam per captured piece. Active **Bayangan Pitung (4):** a revealed Telik Sandi becomes hidden again.
+- **Calon Arang:** passive: Santet costs 3. Active **Teluh Massal (7):** 3 enemy pieces (not unseen ones) can't move on their owner's next turn. "Random" is deterministic per position (seeded by the turn count), so replays and the AI see the same pick.
+- **Jaka Tingkir:** passive: every Pendekar survives the first capture that hits it (the capturer still lands beyond). Active **Kerbau Ngamuk (5):** one piece charges up to 3 points along a line and takes every enemy it passes (stops at own pieces, blockers, immune/shielded/unseen enemies). It can kill the Patih; Pancasona is offered.
+- **Sawerigading:** passive: pieces on the edge rows (row 1 and 5) step one point farther. Active **Layar Pinisi (5):** two of your pieces jump to the same column on the opposite edge row (row y becomes 4 − y) if that point is free.
+- **Lutung Kasarung:** passive: the Dukun shields its two most important neighbours. Active **Wujud Asli (6):** one Prajurit becomes a Dam.
+- The AI weighs its Commander active each turn with the same shorter search it uses for ajian (Kerbau charges are only tried when they take something; options are capped at 40).
 
 ## Prototype choices not in the GDD (to confirm or replace)
 

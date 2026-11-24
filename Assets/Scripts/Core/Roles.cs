@@ -27,6 +27,9 @@ namespace Pamor.Core
         /// <summary>Saipi Angin: extra moves this piece may still make this turn.</summary>
         public int ExtraMoves;
 
+        /// <summary>Jaka Tingkir's Pendekar: survives the first capture that hits it.</summary>
+        public bool GuardOnce;
+
         public bool Untouchable => ImmuneTurns > 0 || HiddenTurns > 0;
 
         public static Piece Of(Side side, Role role, bool dam = false) =>

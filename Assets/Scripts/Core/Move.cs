@@ -43,6 +43,10 @@ namespace Pamor.Core
         public List<int> Demoted = new List<int>();
         /// <summary>The point a Dukun now shields for the opponent's next turn, or -1.</summary>
         public int Shield = -1;
+        /// <summary>A second shielded point (Lutung Kasarung), or -1.</summary>
+        public int Shield2 = -1;
+        /// <summary>Jumped pieces that survived (Jaka Tingkir's Pendekar guard).</summary>
+        public List<int> Guarded = new List<int>();
         /// <summary>Sides whose Senopati fell this move (their Prajurit can't capture next turn).</summary>
         public List<Side> SenopatiFell = new List<Side>();
         /// <summary>The mover takes another move (combo).</summary>

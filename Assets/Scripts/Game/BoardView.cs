@@ -117,10 +117,21 @@ namespace Pamor
             var gold = Mats.Lit(Palette.AccentPrada, 0.6f, 0.5f, 0.6f);
             var hex = Mats.Lit(Palette.Shadow, 0.2f);
             var mist = Mats.Lit(Palette.SkyBounce, 0.6f, 0f, 0.5f);
+            var stone = Mats.Lit(Palette.Sogan, 0.15f);
+            var timber = Mats.Lit(Palette.FrameWood, 0.35f);
             for (int p = 0; p < BoardGraph.PointCount; p++)
             {
+                // Sangkuriang's blockers: squat stone pillars. Perahu Semalam's wall: a timber palisade.
+                if (board.IsPermanentBlocker(p))
+                    Mats.Prim(PrimitiveType.Cylinder, shieldRoot, "Penghalang " + BoardGraph.Name(p), stone, ToLocal(p) + Vector3.up * 0.3f, new Vector3(0.8f, 0.3f, 0.8f));
+                if (board.IsWall(p))
+                    for (int i = -1; i <= 1; i++)
+                        Mats.Prim(PrimitiveType.Cube, shieldRoot, "Tembok " + BoardGraph.Name(p), timber, ToLocal(p) + new Vector3(i * 0.28f, 0.4f, 0f), new Vector3(0.22f, 0.8f, 0.9f));
                 var piece = board[p];
                 if (!piece.Exists) continue;
+                // Jaka Tingkir's guard, as its owner sees it: a gold band at the base.
+                if (piece.GuardOnce && piece.Side == viewer)
+                    Mats.Prim(PrimitiveType.Cylinder, shieldRoot, "Guard " + BoardGraph.Name(p), gold, ToLocal(p) + Vector3.up * 0.04f, new Vector3(1.0f, 0.015f, 1.0f));
                 // Tameng Waja: a gold band hovering around the piece.
                 if (piece.ImmuneTurns > 0)
                     Mats.Prim(PrimitiveType.Cylinder, shieldRoot, "Tameng " + BoardGraph.Name(p), gold, ToLocal(p) + Vector3.up * 0.45f, new Vector3(1.05f, 0.02f, 1.05f));
@@ -138,8 +149,8 @@ namespace Pamor
                     Mats.Prim(PrimitiveType.Cylinder, shieldRoot, "Panglimunan " + BoardGraph.Name(p), mist, ToLocal(p) + Vector3.up * 0.02f, new Vector3(1.3f, 0.01f, 1.3f));
             }
             foreach (var side in new[] { Side.Hitam, Side.Merah })
+            foreach (var p in board.Shields(side))
             {
-                int p = board.Shielded(side);
                 if (p < 0) continue;
                 // A ring of four gold posts around the shielded piece.
                 for (int i = 0; i < 4; i++)
@@ -213,7 +224,15 @@ namespace Pamor
             for (int i = 1; i < move.Path.Count; i++)
             {
                 yield return view.Hop(ToLocal(move.Path[i]));
-                if (move.IsCapture) RemovePiece(move.Captured[i - 1], null);
+                if (!move.IsCapture) continue;
+                int cap = move.Captured[i - 1];
+                if (result.Guarded.Contains(cap))
+                {
+                    // Jaka Tingkir's guard: the piece shrugs off the hit and stays.
+                    Burst(ToLocal(cap), Palette.AccentPrada, 12);
+                    PieceAt(cap)?.Shake();
+                }
+                else RemovePiece(cap, null);
             }
 
             pieces[move.To] = view;
@@ -241,8 +260,12 @@ namespace Pamor
         /// <summary>Plays an ajian: a burst on the caster (and target), and hops for pieces it moves.</summary>
         public IEnumerator PlayCast(CastResult result)
         {
-            Burst(ToLocal(result.CasterPoint), Palette.AccentPrada, 14);
-            if (result.Target != result.CasterPoint) Burst(ToLocal(result.Target), Palette.Shadow, 14);
+            if (result.CasterPoint >= 0) Burst(ToLocal(result.CasterPoint), Palette.AccentPrada, 14);
+            if (result.Target >= 0 && result.Target != result.CasterPoint) Burst(ToLocal(result.Target), Palette.Shadow, 14);
+            foreach (var p in result.Frozen) Burst(ToLocal(p), Palette.Shadow, 10);
+            foreach (var p in result.Walls) Burst(ToLocal(p), Palette.FrameWood, 10);
+            foreach (var p in result.Captured) RemovePiece(p, null);
+            foreach (var p in result.Guarded) { Burst(ToLocal(p), Palette.AccentPrada, 12); PieceAt(p)?.Shake(); }
             var hops = new List<Coroutine>();
             foreach (var (from, to) in result.Shifts)
             {
