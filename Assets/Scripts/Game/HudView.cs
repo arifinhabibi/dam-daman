@@ -17,9 +17,11 @@ namespace Pamor
     {
         public event Action ResumePressed, RestartPressed, TitlePressed, PausePressed;
         public event Action PlayLocalPressed, PlayAiPressed, DifficultyPressed;
+        public event Action SetupRandomPressed, SetupReadyPressed, HandoffPressed;
 
         RectTransform root;
-        GameObject hud, title, pause, ended;
+        GameObject hud, title, pause, ended, setup, handoff;
+        TextMeshProUGUI setupTitle, setupHint, handoffTitle, handoffButtonLabel, roleInfo;
         TextMeshProUGUI turnText, hintText, hitamCount, merahCount, hitamName, merahName, endedBanner, endedStats, difficultyLabel;
         Image turnDisc, fade, flash;
         RectTransform endedBannerRect, hintPanel;
@@ -99,6 +101,31 @@ namespace Pamor
             Button(ended.transform, "Again", "MAIN LAGI", new Vector2(0.5f, 0.35f), new Vector2(0, 40), new Vector2(460, 96), () => RestartPressed?.Invoke());
             Button(ended.transform, "Title", "JUDUL", new Vector2(0.5f, 0.35f), new Vector2(0, -80), new Vector2(460, 96), () => TitlePressed?.Invoke());
 
+            // --- Fase Susun: the live board stays visible; a banner on top, controls at the bottom
+            setup = Panel(root, "Setup", Color.clear, Vector2.zero, Vector2.one).gameObject;
+            var setupBanner = FramedPanel(setup.transform, "Setup Banner", new Vector2(0.5f, 1f), new Vector2(0, -70), new Vector2(720, 96));
+            setupTitle = Text(setupBanner, "Label", "FASE SUSUN · HITAM", 40, Palette.AccentPrada, new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(700, 80));
+            setupTitle.characterSpacing = 6;
+            var setupBar = FramedPanel(setup.transform, "Setup Bar", new Vector2(0.5f, 0f), new Vector2(0, 60), new Vector2(1240, 90));
+            setupHint = Text(setupBar, "Hint", "KETUK DUA BIDAKMU UNTUK MENUKAR POSISI", 24, Palette.Kelir, new Vector2(0f, 0.5f), new Vector2(370, 0), new Vector2(690, 80));
+            setupHint.characterSpacing = 2;
+            setupHint.enableAutoSizing = true;
+            setupHint.fontSizeMin = 16; setupHint.fontSizeMax = 24;
+            Button(setupBar, "Random", "ACAK", new Vector2(1f, 0.5f), new Vector2(-380, 0), new Vector2(220, 76), () => SetupRandomPressed?.Invoke());
+            Button(setupBar, "Ready", "SIAP", new Vector2(1f, 0.5f), new Vector2(-140, 0), new Vector2(220, 76), () => SetupReadyPressed?.Invoke());
+            var infoPanel = FramedPanel(setup.transform, "Role Info", new Vector2(0f, 0.5f), new Vector2(200, 0), new Vector2(330, 300));
+            roleInfo = Text(infoPanel, "Text", "", 26, Palette.Kelir, new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(300, 280));
+            roleInfo.textWrappingMode = TextWrappingModes.Normal;
+            roleInfo.alignment = TextAlignmentOptions.TopLeft;
+
+            // --- Handoff: an opaque cover so the next player can't see the other's army
+            handoff = Panel(root, "Handoff", Palette.Shadow, Vector2.zero, Vector2.one).gameObject;
+            handoffTitle = Text(handoff.transform, "Label", "SERAHKAN KE MERAH", 100, Palette.AccentPrada, new Vector2(0.5f, 0.62f), Vector2.zero, new Vector2(1600, 140));
+            handoffTitle.characterSpacing = 16;
+            Text(handoff.transform, "Sub", "JANGAN INTIP PASUKAN LAWAN", 36, WithAlpha(Palette.Kelir, 0.8f), new Vector2(0.5f, 0.62f), new Vector2(0, -110), new Vector2(1200, 60)).characterSpacing = 12;
+            var go = Button(handoff.transform, "Continue", "AKU MERAH, LANJUT", new Vector2(0.5f, 0.32f), Vector2.zero, new Vector2(560, 100), () => HandoffPressed?.Invoke());
+            handoffButtonLabel = go.GetComponentInChildren<TextMeshProUGUI>();
+
             flash = Panel(root, "Flash", WithAlpha(Palette.AccentPrada, 0f), Vector2.zero, Vector2.one).GetComponent<Image>();
             flash.raycastTarget = false;
             fade = Panel(root, "Fade", WithAlpha(Palette.Shadow, 0f), Vector2.zero, Vector2.one).GetComponent<Image>();
@@ -124,6 +151,25 @@ namespace Pamor
             hud.SetActive(state == GameState.Playing || state == GameState.Paused);
             pause.SetActive(state == GameState.Paused);
             ended.SetActive(state == GameState.Ended);
+            setup.SetActive(state == GameState.Setup);
+            handoff.SetActive(state == GameState.Handoff);
+        }
+
+        static string SideWord(Side s) => s == Side.Hitam ? "HITAM" : "MERAH";
+
+        public void SetSetup(Side side, string hint)
+        {
+            setupTitle.text = "FASE SUSUN · " + SideWord(side);
+            setupHint.text = hint;
+        }
+
+        /// <summary>Shows what a role does, in the panel beside the board during Fase Susun.</summary>
+        public void SetRoleInfo(string text) => roleInfo.text = text;
+
+        public void SetHandoff(Side nextPlayer)
+        {
+            handoffTitle.text = "SERAHKAN KE " + SideWord(nextPlayer);
+            handoffButtonLabel.text = "AKU " + SideWord(nextPlayer) + ", LANJUT";
         }
 
         public IEnumerator FadeOut() => Ease.Tween(0.15f, t => fade.color = WithAlpha(Palette.Shadow, t), Ease.OutCubic);

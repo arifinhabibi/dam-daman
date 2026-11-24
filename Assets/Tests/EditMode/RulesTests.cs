@@ -48,6 +48,19 @@ namespace Pamor.Tests
             }
         }
 
+        [Test]
+        public void FormationSwap_MovesRoles_AndStaysValid()
+        {
+            var f = Formation.Default(Side.Hitam);
+            int patih = P("a3"), front = P("d3");
+            f.Swap(patih, front);
+            Assert.AreEqual(Role.Patih, f.Roles[front]);
+            Assert.AreEqual(Role.Prajurit, f.Roles[patih]);
+            Assert.IsTrue(f.IsValid(Side.Hitam, out var error), error);
+            var b = Board.CreateStandard(f);
+            Assert.AreEqual("d3", BoardGraph.Name(b.Find(Side.Hitam, Role.Patih)));
+        }
+
         // ---------- movement by role
 
         [Test]

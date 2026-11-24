@@ -39,7 +39,7 @@ Still open: how the GDD's passive-limit "outer edge collapse" maps onto this boa
 - Only Prajurit promote to Dam (not Telik Sandi, even though it looks like one).
 - Draw counter counts only turns where a backward-capable piece (Dam, Pendekar, Patih) moved without capture or burn.
 - The AI currently sees hidden enemy roles.
-- Until Fase Susun exists, the player uses the default formation and the AI a random one (Patih never on its front column).
+- Fase Susun (built): each player swaps roles between their own 16 starting points (tap two pieces), or presses ACAK for a random valid army, then SIAP. The last arrangement is kept for the next match. The AI arranges at random every match (Patih never on its front column). Lawan Teman shows a "Serahkan ke …" cover between the two setups and between every turn (not between a combo's bonus move), and the camera turns to the player to move. All roles are shown when the match ends.
 
 Still open: the exact reveal rule (proposal: a piece is revealed when it does something only its role can do, captures, or is captured; Telik Sandi stays hidden until it captures or is captured, per the GDD), and where Fase Susun may place pieces (the GDD says "3 baris awal"; proposal: the player's own 16 starting points).
 

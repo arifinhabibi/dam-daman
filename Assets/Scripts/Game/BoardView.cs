@@ -93,13 +93,13 @@ namespace Pamor
         /// Shows each piece's role as the viewer may see it: own pieces and revealed enemies show their
         /// real role; unrevealed enemies show as Prajurit. Also places the Dukun shield markers.
         /// </summary>
-        public void RefreshRoles(Board board, Side viewer)
+        public void RefreshRoles(Board board, Side viewer, bool revealAll = false)
         {
             foreach (var kv in pieces)
             {
                 var piece = board[kv.Key];
                 if (!piece.Exists) continue;
-                bool known = piece.Side == viewer || piece.Revealed;
+                bool known = revealAll || piece.Side == viewer || piece.Revealed;
                 kv.Value.ShowRole(known ? piece.Role : Role.Prajurit);
             }
             ShowShields(board);

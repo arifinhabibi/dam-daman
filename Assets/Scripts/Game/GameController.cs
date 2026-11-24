@@ -7,7 +7,7 @@ using UnityEngine.InputSystem;
 
 namespace Pamor
 {
-    public enum GameState { Title, Playing, Paused, Ended }
+    public enum GameState { Title, Setup, Handoff, Playing, Paused, Ended }
     public enum MatchMode { LocalPvP, VsAi }
 
     /// <summary>
@@ -59,6 +59,9 @@ namespace Pamor
             hud.PlayLocalPressed += () => BeginTransition(GameState.Playing, MatchMode.LocalPvP);
             hud.PlayAiPressed += () => BeginTransition(GameState.Playing, MatchMode.VsAi);
             hud.DifficultyPressed += CycleDifficulty;
+            hud.SetupRandomPressed += RandomizeSetup;
+            hud.SetupReadyPressed += ConfirmSetup;
+            hud.HandoffPressed += ConfirmHandoff;
             ResetMatch();
             EnterState(GameState.Title);
         }
@@ -106,6 +109,9 @@ namespace Pamor
             var pos = pointer.position.ReadValue();
             if (pointer.press.wasPressedThisFrame)
             {
+                // Presses that start on a button or panel belong to the UI, not the board or camera.
+                var es = UnityEngine.EventSystems.EventSystem.current;
+                if (es != null && es.IsPointerOverGameObject()) { pressing = false; return; }
                 pressing = true; dragging = false;
                 pressStart = lastPointer = pos;
             }
@@ -119,9 +125,11 @@ namespace Pamor
             else if (pressing && pointer.press.wasReleasedThisFrame)
             {
                 pressing = false;
-                if (dragging) return;
-                if (transitioning || State != GameState.Playing || Busy || IsAiTurn) return;
-                if (boardView.TryGetPoint(cam.ScreenPointToRay(pos), out var point)) Tap(point);
+                if (dragging || transitioning) return;
+                bool hit = boardView.TryGetPoint(cam.ScreenPointToRay(pos), out var point);
+                if (State == GameState.Setup) { if (hit) SetupTap(point); else SetupDeselect(); return; }
+                if (State != GameState.Playing || Busy || IsAiTurn) return;
+                if (hit) Tap(point);
                 else Deselect();
             }
         }
@@ -217,13 +225,133 @@ namespace Pamor
             if (Winner.HasValue || IsDraw)
             {
                 Debug.Log($"[Pamor] {(IsDraw ? "draw" : Winner + " wins")} after {MovesPlayed} moves");
+                boardView.RefreshRoles(Board, Viewer, revealAll: true);
                 EnterState(GameState.Ended);
                 yield return hud.PlayEnd(EndBanner(), MovesPlayed);
+                yield break;
+            }
+            if (Mode == MatchMode.LocalPvP && !result.BonusMove)
+            {
+                // Pass the phone: cover the board so the next player can't see the other army's roles.
+                pendingNote = note;
+                ShowHandoff(Board.ToMove, BeginTurnView);
                 yield break;
             }
             RefreshTurnHints();
             if (note != null) hud.NudgeHint(note);
             if (IsAiTurn) turnRoutine = StartCoroutine(AiTurn());
+        }
+
+        // ---------- Fase Susun and pass-the-phone
+
+        readonly Formation[] formations = new Formation[2];
+        Side setupSide;
+        int? setupSelected;
+        System.Action afterHandoff;
+        string pendingNote;
+
+        static int SideIndex(Side s) => s == Side.Hitam ? 0 : 1;
+        Formation FormationOf(Side s) => formations[SideIndex(s)] ??= Formation.Default(s);
+
+        /// <summary>Starts a side's secret arrangement on the live board.</summary>
+        void BeginSetup(Side side)
+        {
+            setupSide = side;
+            setupSelected = null;
+            Board = Board.CreateStandard(FormationOf(Side.Hitam), FormationOf(Side.Merah));
+            boardView.Build(Board);
+            boardView.RefreshRoles(Board, side);
+            boardView.ClearMustCapture();
+            cameraRig.FaceSide(side);
+            hud.SetSetup(side, "KETUK DUA BIDAKMU UNTUK MENUKAR POSISI");
+            hud.SetRoleInfo("Ketuk bidakmu untuk melihat perannya.");
+            EnterState(GameState.Setup);
+        }
+
+        /// <summary>Tap during Fase Susun: select one of your pieces, then another to swap their roles.</summary>
+        public void SetupTap(int point)
+        {
+            if (State != GameState.Setup) return;
+            if (Board.Owner(point) != setupSide) { SetupDeselect(); return; }
+            hud.SetRoleInfo(RoleInfo(Board[point].Role));
+            if (!setupSelected.HasValue) { setupSelected = point; boardView.PieceAt(point)?.SetSelected(true); return; }
+            int a = setupSelected.Value;
+            SetupDeselect();
+            if (a == point) return;
+
+            var f = FormationOf(setupSide);
+            f.Swap(a, point);
+            Board.Place(a, setupSide, f.Roles[a]);
+            Board.Place(point, setupSide, f.Roles[point]);
+            boardView.RefreshRoles(Board, setupSide);
+            boardView.PieceAt(a)?.Shake();
+            boardView.PieceAt(point)?.Shake();
+            hud.SetRoleInfo(RoleInfo(f.Roles[point]));
+        }
+
+        void SetupDeselect()
+        {
+            if (setupSelected.HasValue) boardView.PieceAt(setupSelected.Value)?.SetSelected(false);
+            setupSelected = null;
+        }
+
+        public void RandomizeSetup()
+        {
+            if (State != GameState.Setup) return;
+            formations[SideIndex(setupSide)] = Formation.Random(setupSide, new System.Random());
+            BeginSetup(setupSide);
+        }
+
+        public void ConfirmSetup()
+        {
+            if (State != GameState.Setup) return;
+            if (!FormationOf(setupSide).IsValid(setupSide, out var error)) { hud.SetSetup(setupSide, error); return; }
+            SetupDeselect();
+            if (Mode == MatchMode.LocalPvP && setupSide == Side.Hitam) { ShowHandoff(Side.Merah, () => BeginSetup(Side.Merah)); return; }
+            ResetMatch();
+            if (Mode == MatchMode.LocalPvP) { ShowHandoff(Side.Hitam, BeginTurnView); return; }
+            cameraRig.FaceSide(Viewer);
+            EnterState(GameState.Playing);
+            if (IsAiTurn) turnRoutine = StartCoroutine(AiTurn());
+        }
+
+        void ShowHandoff(Side next, System.Action after)
+        {
+            afterHandoff = after;
+            hud.SetHandoff(next);
+            EnterState(GameState.Handoff);
+        }
+
+        public void ConfirmHandoff()
+        {
+            if (State != GameState.Handoff) return;
+            var after = afterHandoff;
+            afterHandoff = null;
+            after?.Invoke();
+        }
+
+        /// <summary>After a handoff: show the board as the player to move sees it, from their side.</summary>
+        void BeginTurnView()
+        {
+            boardView.RefreshRoles(Board, Viewer);
+            cameraRig.FaceSide(Board.ToMove);
+            EnterState(GameState.Playing);
+            RefreshTurnHints();
+            if (pendingNote != null) hud.NudgeHint(pendingNote);
+            pendingNote = null;
+        }
+
+        static string RoleInfo(Role role)
+        {
+            switch (role)
+            {
+                case Role.Patih: return "PATIH\nGerak 1 titik ke segala arah. Kalau Patih gugur, kamu kalah.";
+                case Role.Senopati: return "SENOPATI\nGerak sampai 2 titik, tidak mundur. Kalau gugur, Prajurit-mu tidak bisa makan 1 giliran.";
+                case Role.Pendekar: return "PENDEKAR\nGerak 1 titik, boleh mundur. Boleh belok saat makan beruntun.";
+                case Role.Dukun: return "DUKUN\nTidak bisa makan. Saat digerakkan, melindungi 1 bidak di sebelahnya selama giliran lawan.";
+                case Role.TelikSandi: return "TELIK SANDI\nTerlihat seperti Prajurit sampai ia makan atau dimakan.";
+                default: return "PRAJURIT\nGerak 1 titik ke depan, serong, atau samping. Jadi Dam di ujung segitiga lawan.";
+            }
         }
 
         /// <summary>Searches on a worker thread so the frame never hitches, with a short minimum "thinking" beat.</summary>
@@ -276,9 +404,9 @@ namespace Pamor
             matchId++;
             Busy = false;
             AiThinking = false;
-            // Until Fase Susun lands, the player uses the default formation; the AI arranges at random.
-            var merah = Mode == MatchMode.VsAi ? Formation.Random(Side.Merah, new System.Random()) : null;
-            Board = Board.CreateStandard(null, merah);
+            // Each player's Fase Susun arrangement; the AI arranges itself at random every match.
+            if (Mode == MatchMode.VsAi) formations[SideIndex(AiSide)] = Formation.Random(AiSide, new System.Random());
+            Board = Board.CreateStandard(FormationOf(Side.Hitam), FormationOf(Side.Merah));
             MovesPlayed = 0;
             Winner = null;
             IsDraw = false;
@@ -318,11 +446,11 @@ namespace Pamor
             Time.timeScale = 1f;
             Mode = mode;
             ResetMatch();
-            if (next == GameState.Playing) cameraRig.ResetView();
-            EnterState(next);
+            // Starting (or restarting) a match always goes through Fase Susun, keeping last match's arrangement.
+            if (next == GameState.Playing) BeginSetup(Side.Hitam);
+            else EnterState(next);
             yield return hud.FadeIn();
             transitioning = false;
-            if (State == GameState.Playing && IsAiTurn) turnRoutine = StartCoroutine(AiTurn());
         }
     }
 }

@@ -68,6 +68,20 @@ namespace Pamor.Core
     {
         public readonly Dictionary<int, Role> Roles = new Dictionary<int, Role>();
 
+        /// <summary>Swaps the roles on two of the side's starting points; counts stay valid by construction.</summary>
+        public void Swap(int a, int b)
+        {
+            if (!Roles.ContainsKey(a) || !Roles.ContainsKey(b)) throw new ArgumentException("Both points must be starting points of this formation.");
+            var t = Roles[a]; Roles[a] = Roles[b]; Roles[b] = t;
+        }
+
+        public Formation Copy()
+        {
+            var f = new Formation();
+            foreach (var kv in Roles) f.Roles[kv.Key] = kv.Value;
+            return f;
+        }
+
         /// <summary>The 16 starting points of a side: its triangle plus the two nearest columns.</summary>
         public static int[] StartPoints(Side side) =>
             Board.AllPoints().Where(p => side == Side.Hitam ? BoardGraph.Xs[p] <= 3 : BoardGraph.Xs[p] >= 5).ToArray();

@@ -44,6 +44,13 @@ namespace Pamor
             orbit.RadialAxis.Value = 1f;
         }
 
+        /// <summary>Puts the camera behind a side, so that player's own pieces are at the bottom of the screen.</summary>
+        public void FaceSide(Core.Side side)
+        {
+            ResetView();
+            orbit.HorizontalAxis.Value = side == Core.Side.Hitam ? startYaw : startYaw - 180f;
+        }
+
         /// <summary>Drag in screen pixels: horizontal spins around the board, vertical tilts.</summary>
         public void Rotate(Vector2 pixels)
         {
