@@ -6,143 +6,195 @@ namespace Pamor.Tests
 {
     public class RulesTests
     {
-        static Square Sq(string name) => new Square(name[1] - '1', name[0] - 'a');
-        static readonly Rules R = Rules.Default;
+        static int P(string name) => BoardGraph.Parse(name);
+        static Rules R => Rules.Default;
+        static string[] Names(System.Collections.Generic.IEnumerable<int> pts) => pts.Select(BoardGraph.Name).OrderBy(s => s).ToArray();
+        static Move Find(Board b, string notation) => R.LegalMoves(b).First(m => m.ToString() == notation);
 
         [Test]
-        public void StandardBoard_Has12PiecesEach_HitamMovesFirst_With7Steps()
+        public void Graph_Has37Points_ApexHas8Neighbours_TriangleTipHas2()
+        {
+            Assert.AreEqual(37, BoardGraph.PointCount);
+            CollectionAssert.AreEqual(new[] { "b2", "b3", "b4", "c2", "c4", "d2", "d3", "d4" }, Names(BoardGraph.Rays[P("c3")].Select(r => r[0])));
+            CollectionAssert.AreEqual(new[] { "a3", "b2" }, Names(BoardGraph.Rays[P("a1")].Select(r => r[0])));
+        }
+
+        [Test]
+        public void StandardBoard_16Each_CentreColumnEmpty_HitamHas9OpeningMoves()
         {
             var b = Board.CreateStandard();
-            Assert.AreEqual(12, b.CountPieces(Side.Hitam));
-            Assert.AreEqual(12, b.CountPieces(Side.Merah));
-            Assert.AreEqual(Side.Hitam, b.ToMove);
+            Assert.AreEqual(16, b.CountPieces(Side.Hitam));
+            Assert.AreEqual(16, b.CountPieces(Side.Merah));
+            Assert.IsTrue(Board.AllPoints().Where(p => BoardGraph.Xs[p] == 4).All(p => b[p] == 0));
             var moves = R.LegalMoves(b);
-            Assert.AreEqual(7, moves.Count);
-            Assert.IsTrue(moves.All(m => !m.IsCapture && m.To.Row == 3));
+            Assert.AreEqual(9, moves.Count, string.Join(" ", moves));
+            Assert.IsTrue(moves.All(m => BoardGraph.Xs[m.To] == 4));
         }
 
         [Test]
-        public void Men_OnlyStepForward()
-        {
-            var b = Board.CreateEmpty(Side.Merah);
-            b[Sq("d4")] = -Board.Man;
-            var tos = R.LegalMoves(b).Select(m => m.To.ToString()).OrderBy(s => s).ToArray();
-            CollectionAssert.AreEqual(new[] { "c3", "e3" }, tos);
-        }
-
-        [Test]
-        public void Capture_IsMandatory()
+        public void Man_MovesForwardDiagonalAndSideways_NeverBackward()
         {
             var b = Board.CreateEmpty();
-            b[Sq("c3")] = Board.Man;
-            b[Sq("d4")] = -Board.Man;
-            b[Sq("g1")] = Board.Man; // could step, but must not
-            var moves = R.LegalMoves(b);
-            Assert.AreEqual(1, moves.Count);
-            Assert.AreEqual("c3xe5", moves[0].ToString());
-            Assert.IsTrue(R.HasAnyCapture(b));
+            b[P("e3")] = Board.Man;
+            CollectionAssert.AreEqual(new[] { "e2", "e4", "f2", "f3", "f4" }, Names(R.LegalMoves(b).Select(m => m.To)));
         }
 
         [Test]
-        public void Men_CaptureBackward()
+        public void Man_CapturesForward()
         {
             var b = Board.CreateEmpty();
-            b[Sq("e5")] = Board.Man;
-            b[Sq("d4")] = -Board.Man;
-            var moves = R.LegalMoves(b);
-            Assert.AreEqual(1, moves.Count);
-            Assert.AreEqual("e5xc3", moves[0].ToString());
+            b[P("d3")] = Board.Man;
+            b[P("e3")] = -Board.Man;
+            CollectionAssert.AreEqual(new[] { "d3xf3" }, R.Captures(b).Select(m => m.ToString()).ToArray());
         }
 
         [Test]
-        public void CaptureChain_MustBeCompleted()
+        public void Man_CapturesSideways()
         {
             var b = Board.CreateEmpty();
-            b[Sq("a1")] = Board.Man;
-            b[Sq("b2")] = -Board.Man;
-            b[Sq("d4")] = -Board.Man;
-            var moves = R.LegalMoves(b);
-            Assert.AreEqual(1, moves.Count);
-            Assert.AreEqual("a1xc3xe5", moves[0].ToString());
-            Assert.AreEqual(2, moves[0].Captured.Count);
-
-            b.Apply(moves[0]);
-            Assert.AreEqual(0, b.CountPieces(Side.Merah));
-            Assert.AreEqual(Board.Man, b[Sq("e5")]);
+            b[P("e2")] = Board.Man;
+            b[P("e3")] = -Board.Man;
+            CollectionAssert.AreEqual(new[] { "e2xe4" }, R.Captures(b).Select(m => m.ToString()).ToArray());
         }
 
         [Test]
-        public void Man_PromotesToDam_WhenMoveEndsOnFarRow()
+        public void Man_DoesNotCaptureBackward()
         {
             var b = Board.CreateEmpty();
-            b[Sq("b7")] = Board.Man;
-            var move = R.LegalMoves(b).First(m => m.To == Sq("a8"));
-            var result = b.Apply(move);
-            Assert.IsTrue(result.Promoted);
-            Assert.AreEqual(Board.Dam, b[Sq("a8")]);
+            b[P("f3")] = Board.Man;
+            b[P("e3")] = -Board.Man;
+            Assert.IsFalse(R.HasAnyCapture(b));
+        }
+
+        [Test]
+        public void CaptureChain_IsCompleted()
+        {
+            var b = Board.CreateEmpty();
+            b[P("c3")] = Board.Man;
+            b[P("d3")] = -Board.Man;
+            b[P("f3")] = -Board.Man;
+            b[P("e1")] = -Board.Man;
+            CollectionAssert.AreEqual(new[] { "c3xe3xg3" }, R.Captures(b).Select(m => m.ToString()).ToArray());
+        }
+
+        [Test]
+        public void SkippingACapture_BurnsThePieceThatCouldCapture()
+        {
+            var b = Board.CreateEmpty();
+            b[P("d3")] = Board.Man;
+            b[P("e3")] = -Board.Man;
+            b[P("a1")] = Board.Man;
+            var result = R.Apply(b, Find(b, "a1-b2"));
+            Assert.AreEqual("d3", BoardGraph.Name(result.Burned));
+            Assert.AreEqual(0, b[P("d3")]);
             Assert.AreEqual(Side.Merah, b.ToMove);
         }
 
         [Test]
-        public void Man_DoesNotPromote_WhenChainOnlyPassesFarRow()
+        public void MovingTheCapturerWithoutCapturing_BurnsItWhereItLands()
         {
-            // Hitam man on d6 jumps e7 to land on f8, then must continue jumping g7 back down to h6.
             var b = Board.CreateEmpty();
-            b[Sq("d6")] = Board.Man;
-            b[Sq("e7")] = -Board.Man;
-            b[Sq("g7")] = -Board.Man;
-            var moves = R.LegalMoves(b);
-            Assert.AreEqual(1, moves.Count);
-            Assert.AreEqual("d6xf8xh6", moves[0].ToString());
-            var result = b.Apply(moves[0]);
-            Assert.IsFalse(result.Promoted);
-            Assert.AreEqual(Board.Man, b[Sq("h6")]);
+            b[P("d3")] = Board.Man;
+            b[P("e3")] = -Board.Man;
+            var result = R.Apply(b, Find(b, "d3-d2"));
+            Assert.AreEqual("d2", BoardGraph.Name(result.Burned));
+            Assert.AreEqual(0, b.CountPieces(Side.Hitam));
         }
 
         [Test]
-        public void Dam_FliesAlongDiagonals()
+        public void Capturing_BurnsNothing()
         {
             var b = Board.CreateEmpty();
-            b[Sq("a1")] = Board.Dam;
-            var moves = R.LegalMoves(b);
-            Assert.AreEqual(7, moves.Count); // b2..h8
+            b[P("d3")] = Board.Man;
+            b[P("e3")] = -Board.Man;
+            b[P("a1")] = -Board.Man;
+            var result = R.Apply(b, Find(b, "d3xf3"));
+            Assert.AreEqual(-1, result.Burned);
+            Assert.AreEqual(1, b.CountPieces(Side.Merah));
+        }
+
+        [Test]
+        public void Man_PromotesOnTheEnemyTriangleTip()
+        {
+            var b = Board.CreateEmpty();
+            b[P("h2")] = Board.Man;
+            b[P("a1")] = -Board.Man;
+            var result = R.Apply(b, Find(b, "h2-i1"));
+            Assert.IsTrue(result.Promoted);
+            Assert.AreEqual(Board.Dam, b[P("i1")]);
+        }
+
+        [Test]
+        public void Dam_FliesAlongEveryLine()
+        {
+            var b = Board.CreateEmpty();
+            b[P("c3")] = Board.Dam;
+            Assert.AreEqual(20, R.LegalMoves(b).Count);
         }
 
         [Test]
         public void Dam_CapturesAtDistance_AndMayLandAnywhereBeyond()
         {
             var b = Board.CreateEmpty();
-            b[Sq("a1")] = Board.Dam;
-            b[Sq("d4")] = -Board.Man;
-            var tos = R.LegalMoves(b).Select(m => m.To.ToString()).OrderBy(s => s).ToArray();
-            CollectionAssert.AreEqual(new[] { "e5", "f6", "g7", "h8" }, tos);
+            b[P("c3")] = Board.Dam;
+            b[P("f3")] = -Board.Man;
+            CollectionAssert.AreEqual(new[] { "g3", "h3", "i3" }, Names(R.Captures(b).Select(m => m.To)));
         }
 
         [Test]
-        public void Dam_CannotJumpTwoAdjacentPieces()
+        public void Dam_TurnsBackIntoAMan_After3TurnsWithoutCapturing()
         {
             var b = Board.CreateEmpty();
-            b[Sq("a1")] = Board.Dam;
-            b[Sq("c3")] = -Board.Man;
-            b[Sq("d4")] = -Board.Man;
-            Assert.IsFalse(R.LegalMoves(b).Any(m => m.IsCapture));
+            b[P("c1")] = Board.Dam;
+            b[P("h3")] = -Board.Man;
+            R.Apply(b, Find(b, "c1-c2"));
+            R.Apply(b, Find(b, "h3-g3"));
+            R.Apply(b, Find(b, "c2-c1"));
+            R.Apply(b, Find(b, "g3-f3"));
+            Assert.AreEqual(Board.Dam, b[P("c1")]);
+            var result = R.Apply(b, Find(b, "c1-c2"));
+            CollectionAssert.AreEqual(new[] { "c2" }, Names(result.Demoted));
+            Assert.AreEqual(Board.Man, b[P("c2")]);
+        }
+
+        [Test]
+        public void ThreeCapturesInOneMove_GiveABonusMove()
+        {
+            var b = Board.CreateEmpty();
+            b[P("c3")] = Board.Man;
+            b[P("d3")] = -Board.Man;
+            b[P("f3")] = -Board.Man;
+            b[P("h3")] = -Board.Man;
+            b[P("e1")] = -Board.Man;
+            var move = Find(b, "c3xe3xg3xi3");
+            var result = R.Apply(b, move);
+            Assert.IsTrue(result.BonusMove);
+            Assert.IsTrue(result.Promoted);
+            Assert.AreEqual(Side.Hitam, b.ToMove);
+
+            // The bonus move doesn't chain into another bonus.
+            var next = R.Apply(b, R.LegalMoves(b)[0]);
+            Assert.IsFalse(next.BonusMove);
+            Assert.AreEqual(Side.Merah, b.ToMove);
         }
 
         [Test]
         public void SideWithNoPieces_Loses()
         {
             var b = Board.CreateEmpty(Side.Merah);
-            b[Sq("a1")] = Board.Man;
+            b[P("a1")] = Board.Man;
             Assert.AreEqual(Side.Hitam, R.Winner(b));
         }
 
         [Test]
         public void SideWithNoLegalMove_Loses()
         {
-            // Merah man on a1 can only step "down" off the board: blocked.
+            // Merah man on a1 may only go sideways to a3 (occupied) or jump it (a5 occupied).
             var b = Board.CreateEmpty(Side.Merah);
-            b[Sq("a1")] = -Board.Man;
-            b[Sq("h8")] = Board.Man;
+            b[P("a1")] = -Board.Man;
+            b[P("a3")] = Board.Man;
+            b[P("a5")] = Board.Man;
+            Assert.AreEqual(0, R.LegalMoves(b).Count);
             Assert.AreEqual(Side.Hitam, R.Winner(b));
         }
 
@@ -150,6 +202,19 @@ namespace Pamor.Tests
         public void StandardBoard_HasNoWinner()
         {
             Assert.IsNull(R.Winner(Board.CreateStandard()));
+        }
+
+        [Test]
+        public void DrawRule_TriggersAfterQuietDamMoves()
+        {
+            var rules = new Rules { DrawQuietMoveLimit = 2 };
+            var b = Board.CreateEmpty();
+            b[P("c1")] = Board.Dam;
+            b[P("g5")] = -Board.Dam;
+            rules.Apply(b, rules.LegalMoves(b).First(m => m.ToString() == "c1-d1"));
+            Assert.IsFalse(rules.IsDraw(b));
+            rules.Apply(b, rules.LegalMoves(b).First(m => m.ToString() == "g5-g4"));
+            Assert.IsTrue(rules.IsDraw(b));
         }
     }
 }

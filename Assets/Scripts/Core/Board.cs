@@ -3,58 +3,53 @@ using System.Collections.Generic;
 
 namespace Pamor.Core
 {
-    /// <summary>The two sides. Hitam (dark) starts at the bottom (rows 0-2) and moves up; Merah moves down.</summary>
+    /// <summary>The two sides. Hitam starts on the left (x 0..3) and moves toward +x; Merah moves toward -x.</summary>
     public enum Side { Hitam = 1, Merah = -1 }
 
-    /// <summary>A square on the 8x8 board. Row 0 is Hitam's home row, column 0 is the left edge.</summary>
-    public readonly struct Square : IEquatable<Square>
-    {
-        public readonly int Row;
-        public readonly int Col;
-        public Square(int row, int col) { Row = row; Col = col; }
-        public bool IsOnBoard => Row >= 0 && Row < Board.Size && Col >= 0 && Col < Board.Size;
-        public bool IsDark => (Row + Col) % 2 == 0;
-        public Square Offset(int dr, int dc) => new Square(Row + dr, Col + dc);
-        public bool Equals(Square other) => Row == other.Row && Col == other.Col;
-        public override bool Equals(object obj) => obj is Square s && Equals(s);
-        public override int GetHashCode() => Row * 31 + Col;
-        public static bool operator ==(Square a, Square b) => a.Equals(b);
-        public static bool operator !=(Square a, Square b) => !a.Equals(b);
-        public override string ToString() => $"{(char)('a' + Col)}{Row + 1}";
-    }
-
     /// <summary>
-    /// Board state. Each cell holds 0 (empty), +1 Hitam man, +2 Hitam Dam, -1 Merah man, -2 Merah Dam.
+    /// Board state on the <see cref="BoardGraph"/> points. Each cell holds 0 (empty), +1 Hitam man,
+    /// +2 Hitam Dam, -1 Merah man, -2 Merah Dam. Game logic lives in <see cref="Rules"/>.
     /// </summary>
     public sealed class Board
     {
-        public const int Size = 8;
         public const int Man = 1;
         public const int Dam = 2;
 
-        readonly int[,] cells = new int[Size, Size];
+        readonly int[] cells = new int[BoardGraph.PointCount];
+        readonly int[] damIdle = new int[BoardGraph.PointCount];
 
-        public Side ToMove { get; private set; } = Side.Hitam;
+        public Side ToMove { get; internal set; } = Side.Hitam;
+        /// <summary>Turns in a row with no capture, burn or man move (only Dams shuffling); drives the draw rule.</summary>
+        public int QuietMoves { get; internal set; }
+        /// <summary>True while the side to move is taking its combo bonus move.</summary>
+        public bool InBonusMove { get; internal set; }
 
-        /// <summary>Turns in a row with no capture and no man moved (only Dams shuffling); drives the draw rule.</summary>
-        public int QuietMoves { get; private set; }
-
-        public int this[Square s]
+        public int this[int p]
         {
-            get => cells[s.Row, s.Col];
-            set => cells[s.Row, s.Col] = value;
+            get => cells[p];
+            set { cells[p] = value; damIdle[p] = 0; }
         }
 
+        /// <summary>Own turns in a row this Dam has gone without capturing.</summary>
+        public int DamIdle(int p) => damIdle[p];
+        internal void SetDamIdle(int p, int turns) => damIdle[p] = turns;
+
+        internal void MovePiece(int from, int to)
+        {
+            if (from == to) return;
+            cells[to] = cells[from]; damIdle[to] = damIdle[from];
+            cells[from] = 0; damIdle[from] = 0;
+        }
+
+        /// <summary>16 pieces each: own triangle plus the two nearest columns of the square; centre column empty.</summary>
         public static Board CreateStandard()
         {
             var b = new Board();
-            for (int r = 0; r < Size; r++)
-            for (int c = 0; c < Size; c++)
+            foreach (var p in AllPoints())
             {
-                var s = new Square(r, c);
-                if (!s.IsDark) continue;
-                if (r < 3) b[s] = Man;
-                else if (r > 4) b[s] = -Man;
+                int x = BoardGraph.Xs[p];
+                if (x <= 3) b[p] = Man;
+                else if (x >= 5) b[p] = -Man;
             }
             return b;
         }
@@ -64,59 +59,30 @@ namespace Pamor.Core
 
         public Board Clone()
         {
-            var b = new Board { ToMove = ToMove, QuietMoves = QuietMoves };
+            var b = new Board { ToMove = ToMove, QuietMoves = QuietMoves, InBonusMove = InBonusMove };
             Array.Copy(cells, b.cells, cells.Length);
+            Array.Copy(damIdle, b.damIdle, damIdle.Length);
             return b;
         }
 
         public static Side? Owner(int piece) => piece > 0 ? Side.Hitam : piece < 0 ? Side.Merah : (Side?)null;
         public static bool IsDam(int piece) => Math.Abs(piece) == Dam;
+        public static Side Other(Side s) => s == Side.Hitam ? Side.Merah : Side.Hitam;
+
+        /// <summary>The column a side's men promote on: the outer edge of the opponent's triangle.</summary>
+        public static int PromotionX(Side side) => side == Side.Hitam ? BoardGraph.Width - 1 : 0;
 
         public int CountPieces(Side side)
         {
             int n = 0;
-            foreach (var s in AllSquares())
-                if (Owner(this[s]) == side) n++;
+            for (int p = 0; p < cells.Length; p++)
+                if (Owner(cells[p]) == side) n++;
             return n;
         }
 
-        public static IEnumerable<Square> AllSquares()
+        public static IEnumerable<int> AllPoints()
         {
-            for (int r = 0; r < Size; r++)
-            for (int c = 0; c < Size; c++)
-                yield return new Square(r, c);
+            for (int p = 0; p < BoardGraph.PointCount; p++) yield return p;
         }
-
-        /// <summary>The row a side's men promote on.</summary>
-        public static int PromotionRow(Side side) => side == Side.Hitam ? Size - 1 : 0;
-
-        /// <summary>Applies a legal move: moves the piece, removes captured pieces, promotes, passes the turn.</summary>
-        public MoveResult Apply(Move move)
-        {
-            int piece = this[move.From];
-            if (Owner(piece) != ToMove) throw new InvalidOperationException($"No {ToMove} piece on {move.From}.");
-
-            QuietMoves = move.IsCapture || !IsDam(piece) ? 0 : QuietMoves + 1;
-            this[move.From] = 0;
-            foreach (var cap in move.Captured) this[cap] = 0;
-
-            bool promoted = false;
-            if (!IsDam(piece) && move.To.Row == PromotionRow(ToMove))
-            {
-                piece = Math.Sign(piece) * Dam;
-                promoted = true;
-            }
-            this[move.To] = piece;
-
-            ToMove = ToMove == Side.Hitam ? Side.Merah : Side.Hitam;
-            return new MoveResult(move, promoted);
-        }
-    }
-
-    public readonly struct MoveResult
-    {
-        public readonly Move Move;
-        public readonly bool Promoted;
-        public MoveResult(Move move, bool promoted) { Move = move; Promoted = promoted; }
     }
 }

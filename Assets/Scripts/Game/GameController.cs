@@ -34,7 +34,7 @@ namespace Pamor
         public bool AiThinking { get; private set; }
 
         readonly Rules rules = Rules.Default;
-        Square? selected;
+        int? selected;
         Camera cam;
         Coroutine turnRoutine;
         bool transitioning;
@@ -73,7 +73,7 @@ namespace Pamor
 
             var screen = pointer.position.ReadValue();
             var world = cam.ScreenToWorldPoint(new Vector3(screen.x, screen.y, -cam.transform.position.z));
-            if (boardView.TryGetSquare(world, out var square)) Tap(square);
+            if (boardView.TryGetPoint(world, out var point)) Tap(point);
             else Deselect();
         }
 
@@ -84,49 +84,47 @@ namespace Pamor
             hud.SetDifficulty(AiDifficulty);
         }
 
-        /// <summary>Handles a tap on a board square; public so it can be driven from tests and the CLI.</summary>
-        public void Tap(Square square)
+        /// <summary>Handles a tap on a board point; public so it can be driven from tests and the CLI.</summary>
+        public void Tap(int point)
         {
             if (State != GameState.Playing || Busy || IsAiTurn) return;
             var legal = rules.LegalMoves(Board);
 
             if (selected.HasValue)
             {
-                var candidates = legal.Where(m => m.From == selected.Value && m.To == square).ToList();
+                var candidates = legal.Where(m => m.From == selected.Value && m.To == point).ToList();
                 if (candidates.Count > 0)
                 {
-                    // Two chains can end on the same square; take the one that captures more.
+                    // Two chains can end on the same point; take the one that captures more.
                     var move = candidates.OrderByDescending(m => m.Captured.Count).First();
                     turnRoutine = StartCoroutine(PlayTurn(move));
                     return;
                 }
             }
 
-            if (Board.Owner(Board[square]) == Board.ToMove)
+            if (Board.Owner(Board[point]) == Board.ToMove)
             {
-                var mine = legal.Where(m => m.From == square).ToList();
+                var mine = legal.Where(m => m.From == point).ToList();
                 if (mine.Count > 0)
                 {
-                    Select(square, mine.Select(m => m.To).Distinct());
+                    Select(point, mine.Select(m => m.To).Distinct());
                     return;
                 }
 
                 Deselect();
-                boardView.PieceAt(square)?.Shake();
-                bool mustCapture = legal.Count > 0 && legal[0].IsCapture;
-                hud.NudgeHint(mustCapture ? "WAJIB MAKAN!" : "BIDAK INI TIDAK BISA JALAN");
-                if (mustCapture) boardView.ShowMustCapture(legal.Select(m => m.From).Distinct());
+                boardView.PieceAt(point)?.Shake();
+                hud.NudgeHint("BIDAK INI TIDAK BISA JALAN");
                 return;
             }
 
             Deselect();
         }
 
-        void Select(Square square, System.Collections.Generic.IEnumerable<Square> destinations)
+        void Select(int point, System.Collections.Generic.IEnumerable<int> destinations)
         {
-            if (selected.HasValue && selected.Value != square) boardView.PieceAt(selected.Value)?.SetSelected(false);
-            selected = square;
-            boardView.PieceAt(square)?.SetSelected(true);
+            if (selected.HasValue && selected.Value != point) boardView.PieceAt(selected.Value)?.SetSelected(false);
+            selected = point;
+            boardView.PieceAt(point)?.SetSelected(true);
             boardView.ShowDestinations(destinations);
         }
 
@@ -143,11 +141,19 @@ namespace Pamor
             var mover = Board.ToMove;
             boardView.PieceAt(move.From)?.SetSelected(false);
             selected = null;
-            var result = Board.Apply(move);
+            var result = rules.Apply(Board, move);
             MovesPlayed++;
-            Debug.Log($"[Pamor] {mover}{(Mode == MatchMode.VsAi && mover == AiSide ? " (AI)" : "")} {move}{(result.Promoted ? " = Dam" : "")}");
-            yield return boardView.PlayMove(move, result.Promoted);
+            Debug.Log($"[Pamor] {mover}{(Mode == MatchMode.VsAi && mover == AiSide ? " (AI)" : "")} {move}"
+                      + (result.Promoted ? " = Dam" : "")
+                      + (result.Burned >= 0 ? $" (dibakar {BoardGraph.Name(result.Burned)})" : "")
+                      + (result.Demoted.Count > 0 ? $" (turun pangkat {string.Join(",", result.Demoted.Select(BoardGraph.Name))})" : "")
+                      + (result.BonusMove ? " (combo)" : ""));
+            yield return boardView.PlayMove(result);
             hud.SetCounts(Board.CountPieces(Side.Hitam), Board.CountPieces(Side.Merah));
+            string note = result.Burned >= 0 ? "DIBAKAR! TIDAK MAKAN"
+                        : result.BonusMove ? "COMBO! LANGKAH BONUS"
+                        : result.Demoted.Count > 0 ? "DAM TURUN PANGKAT"
+                        : null;
 
             Winner = rules.Winner(Board);
             IsDraw = !Winner.HasValue && rules.IsDraw(Board);
@@ -160,6 +166,7 @@ namespace Pamor
                 yield break;
             }
             RefreshTurnHints();
+            if (note != null) hud.NudgeHint(note);
             if (IsAiTurn) turnRoutine = StartCoroutine(AiTurn());
         }
 
@@ -201,7 +208,7 @@ namespace Pamor
             else label = Board.ToMove == Side.Hitam ? "GILIRAN HITAM" : "GILIRAN MERAH";
             string hint = IsAiTurn ? "AI BERPIKIR..." : mustCapture ? "WAJIB MAKAN!" : "";
             hud.SetTurn(Board.ToMove, label, hint);
-            if (mustCapture && !IsAiTurn) boardView.ShowMustCapture(rules.LegalMoves(Board).Select(m => m.From).Distinct());
+            if (mustCapture && !IsAiTurn) boardView.ShowMustCapture(rules.Captures(Board).Select(m => m.From).Distinct());
             else boardView.ClearMustCapture();
         }
 
@@ -219,7 +226,7 @@ namespace Pamor
             IsDraw = false;
             selected = null;
             boardView.Build(Board);
-            hud.SetCounts(12, 12);
+            hud.SetCounts(Board.CountPieces(Side.Hitam), Board.CountPieces(Side.Merah));
             if (Mode == MatchMode.VsAi) hud.SetPlayerNames("KAMU", "AI " + AiDifficulty.ToString().ToUpperInvariant());
             else hud.SetPlayerNames("HITAM", "MERAH");
             RefreshTurnHints();
