@@ -1,59 +1,51 @@
 using System.Collections;
 using UnityEngine;
-using UnityEngine.Rendering;
 
 namespace Pamor
 {
-    /// <summary>One piece on the board: a layered disc (shadow, body, gold rim, core) plus a crown when it is a Dam.</summary>
+    /// <summary>
+    /// One 3D piece: a lacquered disc with an inlaid gold ring on top, plus a gold crown when it is a Dam.
+    /// The root sits on the board point; animation moves the body, so the root stays the logical position.
+    /// </summary>
     public class PieceView : MonoBehaviour
     {
-        const int RestOrder = 10, LiftedOrder = 30;
+        const float DiscHeight = 0.26f;
 
-        SortingGroup group;
         Transform body;
         Transform crown;
-        SpriteRenderer[] renderers;
-        Vector3 baseScale = Vector3.one;
-        Coroutine scaleRoutine;
+        Renderer[] renderers;
+        Vector3 bodyHome;
+        Coroutine liftRoutine;
         FeelTunables feel;
 
         public bool IsDam { get; private set; }
 
-        public static PieceView Create(Transform parent, Sprite disc, Material mat, Color bodyColor, FeelTunables feel)
+        public static PieceView Create(Transform parent, Color bodyColor, FeelTunables feel)
         {
             var go = new GameObject("Piece");
             go.transform.SetParent(parent, false);
             var view = go.AddComponent<PieceView>();
             view.feel = feel;
-            view.group = go.AddComponent<SortingGroup>();
-            view.group.sortingOrder = RestOrder;
 
-            SpriteRenderer Layer(Transform p, string name, Color c, float scale, Vector3 offset, int order)
-            {
-                var t = new GameObject(name).transform;
-                t.SetParent(p, false);
-                t.localPosition = offset;
-                t.localScale = Vector3.one * scale;
-                var sr = t.gameObject.AddComponent<SpriteRenderer>();
-                sr.sprite = disc; sr.sharedMaterial = mat; sr.color = c; sr.sortingOrder = order;
-                return sr;
-            }
-
-            Layer(go.transform, "Shadow", Palette.Shadow, 0.82f, new Vector3(0.05f, -0.07f, 0), 0);
+            var lacquer = Mats.Lit(bodyColor, 0.6f);
+            var gold = Mats.Lit(Palette.AccentPrada, 0.75f, 0.85f);
             view.body = new GameObject("Body").transform;
             view.body.SetParent(go.transform, false);
-            Layer(view.body, "Disc", bodyColor, 0.8f, Vector3.zero, 1);
-            var rim = Layer(view.body, "Rim", Palette.AccentPrada, 0.55f, Vector3.zero, 2);
-            rim.color = new Color(rim.color.r, rim.color.g, rim.color.b, 0.85f);
-            Layer(view.body, "Core", bodyColor, 0.45f, Vector3.zero, 3);
+            view.bodyHome = new Vector3(0f, DiscHeight * 0.5f, 0f);
+            view.body.localPosition = view.bodyHome;
+            // Cylinder primitives are 2 units tall: y scale = half the height.
+            Mats.Prim(PrimitiveType.Cylinder, view.body, "Disc", lacquer, Vector3.zero, new Vector3(0.9f, DiscHeight * 0.5f, 0.9f));
+            Mats.Prim(PrimitiveType.Cylinder, view.body, "Gold Ring", gold, new Vector3(0, 0.015f, 0), new Vector3(0.64f, DiscHeight * 0.5f, 0.64f));
+            Mats.Prim(PrimitiveType.Cylinder, view.body, "Core", lacquer, new Vector3(0, 0.03f, 0), new Vector3(0.5f, DiscHeight * 0.5f, 0.5f));
 
             view.crown = new GameObject("Crown").transform;
             view.crown.SetParent(view.body, false);
-            Layer(view.crown, "Crown Gold", Palette.AccentPrada, 0.34f, Vector3.zero, 4);
-            Layer(view.crown, "Crown Jewel", bodyColor, 0.14f, Vector3.zero, 5);
+            view.crown.localPosition = new Vector3(0, DiscHeight * 0.5f, 0);
+            Mats.Prim(PrimitiveType.Cylinder, view.crown, "Crown Band", gold, new Vector3(0, 0.08f, 0), new Vector3(0.42f, 0.08f, 0.42f));
+            Mats.Prim(PrimitiveType.Sphere, view.crown, "Crown Jewel", Mats.Lit(bodyColor, 0.9f), new Vector3(0, 0.2f, 0), Vector3.one * 0.2f);
             view.crown.localScale = Vector3.zero;
 
-            view.renderers = go.GetComponentsInChildren<SpriteRenderer>(true);
+            view.renderers = go.GetComponentsInChildren<Renderer>(true);
             return view;
         }
 
@@ -61,76 +53,74 @@ namespace Pamor
         {
             IsDam = dam;
             if (!animate) { crown.localScale = dam ? Vector3.one : Vector3.zero; return; }
-            StartCoroutine(Ease.Tween(feel.crownDuration, t => crown.localScale = Vector3.one * Mathf.LerpUnclamped(0f, 1f, t), Ease.OutBack, unscaled: false));
+            float from = crown.localScale.x, to = dam ? 1f : 0f;
+            StartCoroutine(Ease.Tween(feel.crownDuration, t => crown.localScale = Vector3.one * Mathf.LerpUnclamped(from, to, t), Ease.OutBack, unscaled: false));
         }
 
         public void SetSelected(bool selected)
         {
-            group.sortingOrder = selected ? LiftedOrder : RestOrder;
-            ScaleBodyTo(selected ? feel.selectLiftScale : 1f, feel.selectDuration);
+            if (liftRoutine != null) StopCoroutine(liftRoutine);
+            Vector3 fromPos = body.localPosition;
+            Vector3 toPos = bodyHome + (selected ? Vector3.up * 0.3f : Vector3.zero);
+            float fromScale = body.localScale.x, toScale = selected ? feel.selectLiftScale : 1f;
+            liftRoutine = StartCoroutine(Ease.Tween(feel.selectDuration, t =>
+            {
+                body.localPosition = Vector3.LerpUnclamped(fromPos, toPos, t);
+                body.localScale = Vector3.one * Mathf.LerpUnclamped(fromScale, toScale, t);
+            }, Ease.OutBack, unscaled: false));
         }
 
-        void ScaleBodyTo(float target, float duration)
-        {
-            if (scaleRoutine != null) StopCoroutine(scaleRoutine);
-            float from = body.localScale.x;
-            scaleRoutine = StartCoroutine(Ease.Tween(duration, t => body.localScale = baseScale * Mathf.LerpUnclamped(from, target, t), Ease.OutBack, unscaled: false));
-        }
-
-        /// <summary>Slides to a square with a small lift arc, then a landing squash.</summary>
+        /// <summary>Jumps to a board position in an arc, then lands with a squash.</summary>
         public IEnumerator Hop(Vector3 to)
         {
-            group.sortingOrder = LiftedOrder;
+            if (liftRoutine != null) StopCoroutine(liftRoutine);
             Vector3 from = transform.localPosition;
-            float lift = feel.hopArcScale - 1f;
+            float arc = 0.4f + Vector3.Distance(from, to) * 0.15f;
             yield return Ease.Tween(feel.hopDuration, t =>
             {
                 transform.localPosition = Vector3.LerpUnclamped(from, to, t);
-                float arc = Mathf.Sin(Mathf.Clamp01(t) * Mathf.PI) * lift;
-                body.localScale = baseScale * (1f + arc);
+                body.localPosition = bodyHome + Vector3.up * (Mathf.Sin(Mathf.Clamp01(t) * Mathf.PI) * arc);
+                body.localScale = Vector3.one;
             }, Ease.OutCubic, unscaled: false);
 
             yield return Ease.Tween(feel.landSquashDuration, t =>
             {
                 float y = Mathf.Lerp(feel.landSquashY, 1f, t);
-                float x = Mathf.Lerp(2f - feel.landSquashY, 1f, t);
-                body.localScale = new Vector3(baseScale.x * x, baseScale.y * y, 1f);
+                float xz = Mathf.Lerp(2f - feel.landSquashY, 1f, t);
+                body.localScale = new Vector3(xz, y, xz);
             }, Ease.OutCubic, unscaled: false);
-            body.localScale = baseScale;
-            group.sortingOrder = RestOrder;
+            body.localScale = Vector3.one;
+            body.localPosition = bodyHome;
         }
 
-        /// <summary>Pops, then shrinks and fades away; the GameObject is destroyed at the end.</summary>
+        /// <summary>Pops up, then shrinks into the board; the GameObject is destroyed at the end.</summary>
         public IEnumerator Captured()
         {
-            group.sortingOrder = LiftedOrder - 1;
             float pop = feel.capturePopScale;
-            yield return Ease.Tween(feel.captureDuration * 0.4f, t => transform.localScale = Vector3.one * Mathf.LerpUnclamped(1f, pop, t), Ease.OutBack, unscaled: false);
-            var start = new Color[renderers.Length];
-            for (int i = 0; i < renderers.Length; i++) start[i] = renderers[i].color;
+            Vector3 home = body.localPosition;
+            yield return Ease.Tween(feel.captureDuration * 0.4f, t =>
+            {
+                body.localScale = Vector3.one * Mathf.LerpUnclamped(1f, pop, t);
+                body.localPosition = home + Vector3.up * 0.35f * t;
+            }, Ease.OutBack, unscaled: false);
             yield return Ease.Tween(feel.captureDuration * 0.6f, t =>
             {
-                transform.localScale = Vector3.one * Mathf.Lerp(pop, 0f, t);
-                for (int i = 0; i < renderers.Length; i++)
-                    renderers[i].color = new Color(start[i].r, start[i].g, start[i].b, start[i].a * (1f - t));
+                body.localScale = Vector3.one * Mathf.Lerp(pop, 0f, t);
+                body.localPosition = home + Vector3.up * Mathf.Lerp(0.35f, 0f, t);
             }, Ease.OutCubic, unscaled: false);
             Destroy(gameObject);
         }
 
-        public void Shake()
-        {
-            StartCoroutine(ShakeRoutine());
-        }
+        public void Shake() => StartCoroutine(ShakeRoutine());
 
         IEnumerator ShakeRoutine()
         {
-            Vector3 home = body.localPosition;
             yield return Ease.Tween(feel.shakeDuration, t =>
             {
                 float decay = 1f - t;
-                body.localPosition = home + new Vector3(Mathf.Sin(t * Mathf.PI * 8f) * feel.shakeAmplitude * decay, 0f, 0f);
+                body.localPosition = bodyHome + new Vector3(Mathf.Sin(t * Mathf.PI * 8f) * feel.shakeAmplitude * decay, 0f, 0f);
             }, Ease.Linear, unscaled: false);
-            body.localPosition = home;
+            body.localPosition = bodyHome;
         }
     }
 }

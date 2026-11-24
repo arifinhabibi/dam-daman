@@ -15,6 +15,8 @@ namespace Pamor
         public static readonly Color PieceB      = Hex("#9C2F22"); // player B pieces (merah bata / kain red)
         public static readonly Color Shadow      = Hex("#1A120D"); // background, deep shadow
         public static readonly Color AccentPrada = Hex("#D9A441"); // gold accent: Dam crown, highlights, selection
+        public static readonly Color KeyLight    = Hex("#FFE8C8"); // blencong lamp: warm key light
+        public static readonly Color SkyBounce   = Hex("#5C6472"); // cool shadow bounce (ambient sky)
 
         static Color Hex(string hex)
         {

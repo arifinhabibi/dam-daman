@@ -21,6 +21,7 @@ namespace Pamor
 
         [SerializeField] BoardView boardView;
         [SerializeField] HudView hud;
+        [SerializeField] CameraRig cameraRig;
 
         public GameState State { get; private set; } = GameState.Title;
         public MatchMode Mode { get; private set; } = MatchMode.LocalPvP;
@@ -67,14 +68,59 @@ namespace Pamor
                 else if (State == GameState.Paused) SetPaused(false);
             }
 
-            var pointer = Pointer.current;
-            if (pointer == null || !pointer.press.wasPressedThisFrame) return;
-            if (transitioning || State != GameState.Playing || Busy || IsAiTurn) return;
+            HandleGestures();
+        }
 
-            var screen = pointer.position.ReadValue();
-            var world = cam.ScreenToWorldPoint(new Vector3(screen.x, screen.y, -cam.transform.position.z));
-            if (boardView.TryGetPoint(world, out var point)) Tap(point);
-            else Deselect();
+        // A press that moves less than this (in screen pixels, scaled by DPI) is a tap; more is a camera drag.
+        const float DragThresholdInches = 0.08f;
+        Vector2 pressStart, lastPointer;
+        bool pressing, dragging, pinching;
+        float lastPinch;
+
+        /// <summary>One finger or the mouse: tap selects, drag orbits the camera. Two fingers or the wheel: zoom.</summary>
+        void HandleGestures()
+        {
+            if (Mouse.current != null)
+            {
+                float scroll = Mouse.current.scroll.ReadValue().y;
+                if (Mathf.Abs(scroll) > 0.01f) cameraRig.Zoom(scroll * 0.001f);
+            }
+
+            var touches = Touchscreen.current;
+            if (touches != null && touches.touches[1].press.isPressed && touches.touches[0].press.isPressed)
+            {
+                float dist = Vector2.Distance(touches.touches[0].position.ReadValue(), touches.touches[1].position.ReadValue());
+                if (pinching) cameraRig.Zoom((dist - lastPinch) * 0.004f);
+                lastPinch = dist;
+                pinching = true;
+                dragging = true; // a pinch never ends in a tap
+                return;
+            }
+            pinching = false;
+
+            var pointer = Pointer.current;
+            if (pointer == null) return;
+            var pos = pointer.position.ReadValue();
+            if (pointer.press.wasPressedThisFrame)
+            {
+                pressing = true; dragging = false;
+                pressStart = lastPointer = pos;
+            }
+            else if (pressing && pointer.press.isPressed)
+            {
+                float threshold = DragThresholdInches * (Screen.dpi > 0 ? Screen.dpi : 160f);
+                if (!dragging && (pos - pressStart).magnitude > threshold) dragging = true;
+                if (dragging && State != GameState.Paused) cameraRig.Rotate(pos - lastPointer);
+                lastPointer = pos;
+            }
+            else if (pressing && pointer.press.wasReleasedThisFrame)
+            {
+                pressing = false;
+                if (dragging) return;
+                if (transitioning || State != GameState.Playing || Busy || IsAiTurn) return;
+                if (boardView.TryGetPoint(cam.ScreenPointToRay(pos), out var point)) Tap(point);
+                else Deselect();
+            }
         }
 
         public void CycleDifficulty()
@@ -259,6 +305,7 @@ namespace Pamor
             Time.timeScale = 1f;
             Mode = mode;
             ResetMatch();
+            if (next == GameState.Playing) cameraRig.ResetView();
             EnterState(next);
             yield return hud.FadeIn();
             transitioning = false;

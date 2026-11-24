@@ -5,36 +5,39 @@ using UnityEngine;
 
 namespace Pamor
 {
-    /// <summary>Draws the dam-daman line board and its pieces from a <see cref="Board"/>, shows hints, and animates moves.</summary>
+    /// <summary>
+    /// The 3D dam-daman board: a wooden tray with a gold inlay and a kelir-coloured playing surface,
+    /// carved lines and points, and the pieces. Board points lie on the XZ plane at y = 0.
+    /// </summary>
     public class BoardView : MonoBehaviour
     {
         public const float Spacing = 1.5f;
+        const float SurfaceY = 0.02f;
 
-        [SerializeField] Sprite squareSprite;
-        [SerializeField] Sprite discSprite;
-        [SerializeField] Material spriteMaterial;
         public FeelTunables feel = new FeelTunables();
 
         readonly Dictionary<int, PieceView> pieces = new Dictionary<int, PieceView>();
-        readonly List<SpriteRenderer> destinationMarkers = new List<SpriteRenderer>();
-        readonly List<SpriteRenderer> mustCaptureRings = new List<SpriteRenderer>();
+        readonly List<Transform> destinationMarkers = new List<Transform>();
+        readonly List<Transform> mustCaptureRings = new List<Transform>();
         Transform piecesRoot, hintsRoot;
-        SpriteRenderer lastFrom, lastTo;
+        Transform lastFrom, lastTo;
 
         public static Vector3 ToLocal(int p) =>
-            new Vector3((BoardGraph.Xs[p] - 4) * Spacing, (BoardGraph.Ys[p] - 2) * Spacing, 0f);
+            new Vector3((BoardGraph.Xs[p] - 4) * Spacing, SurfaceY, (BoardGraph.Ys[p] - 2) * Spacing);
 
-        /// <summary>The board point nearest a world position, if it is within reach.</summary>
-        public bool TryGetPoint(Vector3 worldPoint, out int point)
+        /// <summary>The board point nearest where a screen ray meets the board, if it is within reach.</summary>
+        public bool TryGetPoint(Ray worldRay, out int point)
         {
-            var local = transform.InverseTransformPoint(worldPoint);
-            local.z = 0f;
             point = -1;
+            var plane = new Plane(transform.up, transform.TransformPoint(new Vector3(0, SurfaceY, 0)));
+            if (!plane.Raycast(worldRay, out float enter)) return false;
+            var local = transform.InverseTransformPoint(worldRay.GetPoint(enter));
             float best = Spacing * 0.5f;
             for (int p = 0; p < BoardGraph.PointCount; p++)
             {
-                float d = Vector3.Distance(local, ToLocal(p));
-                if (d < best) { best = d; point = p; }
+                var d = local - ToLocal(p);
+                d.y = 0f;
+                if (d.magnitude < best) { best = d.magnitude; point = p; }
             }
             return point >= 0;
         }
@@ -44,23 +47,33 @@ namespace Pamor
             for (int i = transform.childCount - 1; i >= 0; i--) Destroy(transform.GetChild(i).gameObject);
             pieces.Clear(); destinationMarkers.Clear(); mustCaptureRings.Clear();
 
-            float w = 8 * Spacing, h = 4 * Spacing;
-            Quad(transform, "Frame", squareSprite, Palette.FrameWood, Vector3.zero, new Vector3(w + 1.6f, h + 1.6f, 1f), 0);
-            Quad(transform, "Frame Inlay", squareSprite, Palette.AccentPrada, Vector3.zero, new Vector3(w + 1.2f, h + 1.2f, 1f), 1);
-            Quad(transform, "Kelir", squareSprite, Palette.Kelir, Vector3.zero, new Vector3(w + 1.0f, h + 1.0f, 1f), 2);
+            float w = 8 * Spacing, d = 4 * Spacing;
+            var wood = Mats.Lit(Palette.FrameWood, 0.45f);
+            var gold = Mats.Lit(Palette.AccentPrada, 0.75f, 0.85f);
+            var kelir = Mats.Lit(Palette.Kelir, 0.2f);
+            var carve = Mats.Lit(Palette.Sogan, 0.3f);
+
+            var tray = new GameObject("Tray").transform; tray.SetParent(transform, false);
+            Mats.Prim(PrimitiveType.Cube, tray, "Frame", wood, new Vector3(0, -0.25f, 0), new Vector3(w + 2.0f, 0.5f, d + 2.0f));
+            Mats.Prim(PrimitiveType.Cube, tray, "Gold Inlay", gold, new Vector3(0, -0.02f, 0), new Vector3(w + 1.4f, 0.06f, d + 1.4f));
+            Mats.Prim(PrimitiveType.Cube, tray, "Kelir", kelir, new Vector3(0, -0.01f, 0), new Vector3(w + 1.1f, 0.06f, d + 1.1f));
 
             var lines = new GameObject("Lines").transform; lines.SetParent(transform, false);
             foreach (var line in BoardGraph.Lines)
                 for (int i = 0; i + 1 < line.Length; i++)
-                    Segment(lines, ToLocal(line[i]), ToLocal(line[i + 1]));
+                {
+                    Vector3 a = ToLocal(line[i]), b = ToLocal(line[i + 1]);
+                    var seg = Mats.Prim(PrimitiveType.Cube, lines, "Line", carve, (a + b) * 0.5f, new Vector3((b - a).magnitude, 0.012f, 0.08f));
+                    seg.localRotation = Quaternion.Euler(0f, -Mathf.Atan2(b.z - a.z, b.x - a.x) * Mathf.Rad2Deg, 0f);
+                }
             var dots = new GameObject("Points").transform; dots.SetParent(transform, false);
             for (int p = 0; p < BoardGraph.PointCount; p++)
-                Quad(dots, "Pt " + BoardGraph.Name(p), discSprite, Palette.Sogan, ToLocal(p), Vector3.one * 0.22f, 4);
+                Mats.Prim(PrimitiveType.Cylinder, dots, "Pt " + BoardGraph.Name(p), carve, ToLocal(p), new Vector3(0.24f, 0.01f, 0.24f));
 
             hintsRoot = new GameObject("Hints").transform; hintsRoot.SetParent(transform, false);
-            lastFrom = Quad(hintsRoot, "Last From", discSprite, WithAlpha(Palette.AccentPrada, 0.35f), Vector3.zero, Vector3.one * 1.05f, 5);
-            lastTo = Quad(hintsRoot, "Last To", discSprite, WithAlpha(Palette.AccentPrada, 0.55f), Vector3.zero, Vector3.one * 1.05f, 5);
-            lastFrom.enabled = lastTo.enabled = false;
+            lastFrom = Disc(hintsRoot, "Last From", Mats.Lit(Palette.AccentPrada, 0.3f), Vector3.zero, 1.05f, 0.012f);
+            lastTo = Disc(hintsRoot, "Last To", Mats.Lit(Palette.AccentPrada, 0.3f, 0f, 0.4f), Vector3.zero, 1.05f, 0.014f);
+            lastFrom.gameObject.SetActive(false); lastTo.gameObject.SetActive(false);
 
             piecesRoot = new GameObject("Pieces").transform; piecesRoot.SetParent(transform, false);
             for (int p = 0; p < BoardGraph.PointCount; p++)
@@ -68,10 +81,9 @@ namespace Pamor
                 int piece = board[p];
                 if (piece == 0) continue;
                 var side = Board.Owner(piece).Value;
-                var view = PieceView.Create(piecesRoot, discSprite, spriteMaterial, side == Side.Hitam ? Palette.PieceA : Palette.PieceB, feel);
+                var view = PieceView.Create(piecesRoot, side == Side.Hitam ? Palette.PieceA : Palette.PieceB, feel);
                 view.name = SideName(side) + " " + BoardGraph.Name(p);
                 view.transform.localPosition = ToLocal(p);
-                view.transform.localScale = Vector3.one * 1.1f;
                 view.SetDam(Board.IsDam(piece), animate: false);
                 pieces[p] = view;
             }
@@ -79,13 +91,21 @@ namespace Pamor
 
         static string SideName(Side s) => s == Side.Hitam ? "Hitam" : "Merah";
 
+        Transform Disc(Transform parent, string name, Material mat, Vector3 pos, float diameter, float height)
+        {
+            var t = Mats.Prim(PrimitiveType.Cylinder, parent, name, mat, pos + Vector3.up * height, new Vector3(diameter, height, diameter));
+            t.GetComponent<Renderer>().shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            return t;
+        }
+
         public PieceView PieceAt(int p) => pieces.TryGetValue(p, out var v) ? v : null;
 
         public void ShowDestinations(IEnumerable<int> points)
         {
             ClearDestinations();
+            var glow = Mats.Lit(Palette.AccentPrada, 0.5f, 0f, 2.5f);
             foreach (var p in points)
-                destinationMarkers.Add(Quad(hintsRoot, "Dest " + BoardGraph.Name(p), discSprite, WithAlpha(Palette.AccentPrada, 0.9f), ToLocal(p), Vector3.one * 0.38f, 6));
+                destinationMarkers.Add(Disc(hintsRoot, "Dest " + BoardGraph.Name(p), glow, ToLocal(p), 0.42f, 0.03f));
         }
 
         public void ClearDestinations()
@@ -97,8 +117,9 @@ namespace Pamor
         public void ShowMustCapture(IEnumerable<int> points)
         {
             ClearMustCapture();
+            var glow = Mats.Lit(Palette.AccentPrada, 0.5f, 0f, 1.6f);
             foreach (var p in points)
-                mustCaptureRings.Add(Quad(hintsRoot, "Must " + BoardGraph.Name(p), discSprite, WithAlpha(Palette.AccentPrada, 0.6f), ToLocal(p), Vector3.one * 1.25f, 5));
+                mustCaptureRings.Add(Disc(hintsRoot, "Must " + BoardGraph.Name(p), glow, ToLocal(p), 1.2f, 0.016f));
         }
 
         public void ClearMustCapture()
@@ -112,9 +133,9 @@ namespace Pamor
             // Hints pulse so they read as interactive; scaled time, so they freeze under pause.
             float k = 0.5f + 0.5f * Mathf.Sin(Time.time * 2f * Mathf.PI / feel.pulsePeriod);
             foreach (var m in destinationMarkers)
-                if (m) m.transform.localScale = Vector3.one * Mathf.Lerp(0.3f, 0.44f, k);
+                if (m) { float s = Mathf.Lerp(0.34f, 0.5f, k); m.localScale = new Vector3(s, m.localScale.y, s); }
             foreach (var r in mustCaptureRings)
-                if (r) r.color = WithAlpha(Palette.AccentPrada, Mathf.Lerp(0.3f, 0.75f, k));
+                if (r) { float s = Mathf.Lerp(1.1f, 1.28f, k); r.localScale = new Vector3(s, r.localScale.y, s); }
         }
 
         /// <summary>Plays a move and its turn-end effects: hops, captures, promotion, burn, demotion.</summary>
@@ -137,13 +158,13 @@ namespace Pamor
             if (result.Promoted)
             {
                 view.SetDam(true, animate: true);
-                Burst(ToLocal(move.To), Palette.AccentPrada, 16);
+                Burst(ToLocal(move.To), Palette.AccentPrada, 18);
                 yield return new WaitForSeconds(feel.crownDuration);
             }
 
-            lastFrom.transform.localPosition = ToLocal(move.From);
-            lastTo.transform.localPosition = ToLocal(move.To);
-            lastFrom.enabled = lastTo.enabled = true;
+            lastFrom.localPosition = ToLocal(move.From) + Vector3.up * 0.012f;
+            lastTo.localPosition = ToLocal(move.To) + Vector3.up * 0.014f;
+            lastFrom.gameObject.SetActive(true); lastTo.gameObject.SetActive(true);
 
             if (result.Burned >= 0)
             {
@@ -151,61 +172,44 @@ namespace Pamor
                 RemovePiece(result.Burned, Palette.AccentPrada);
                 yield return new WaitForSeconds(feel.captureDuration);
             }
-            foreach (var p in result.Demoted) PieceAt(p)?.SetDam(false, animate: false);
+            foreach (var p in result.Demoted) PieceAt(p)?.SetDam(false, animate: true);
         }
 
         void RemovePiece(int p, Color? sparkColor)
         {
             if (!pieces.TryGetValue(p, out var victim)) return;
             pieces.Remove(p);
-            Burst(ToLocal(p), sparkColor ?? (victim.name.StartsWith("Hitam") ? Palette.PieceA : Palette.PieceB), sparkColor.HasValue ? 18 : -1);
+            Burst(ToLocal(p), sparkColor ?? (victim.name.StartsWith("Hitam") ? Palette.PieceA : Palette.PieceB), sparkColor.HasValue ? 20 : -1);
             StartCoroutine(victim.Captured());
         }
 
         void Burst(Vector3 at, Color color, int count = -1)
         {
             if (count < 0) count = feel.captureParticles;
+            var mat = Mats.Lit(color, 0.6f, 0f, 1.5f);
+            var goldMat = Mats.Lit(Palette.AccentPrada, 0.6f, 0f, 2f);
             for (int i = 0; i < count; i++)
             {
                 float ang = (i + Random.value * 0.5f) / count * Mathf.PI * 2f;
-                var dir = new Vector3(Mathf.Cos(ang), Mathf.Sin(ang), 0f);
-                var sr = Quad(hintsRoot, "Spark", discSprite, i % 3 == 0 ? Palette.AccentPrada : color, at, Vector3.one * Random.Range(0.08f, 0.14f), 40);
-                StartCoroutine(Spark(sr, at, at + dir * Random.Range(0.5f, 0.9f)));
+                var dir = new Vector3(Mathf.Cos(ang), Random.Range(0.6f, 1.4f), Mathf.Sin(ang));
+                var spark = Mats.Prim(PrimitiveType.Cube, hintsRoot, "Spark", i % 3 == 0 ? goldMat : mat, at + Vector3.up * 0.3f, Vector3.one * Random.Range(0.07f, 0.12f));
+                spark.GetComponent<Renderer>().shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                StartCoroutine(Spark(spark, at + Vector3.up * 0.3f, dir * Random.Range(0.5f, 0.9f)));
             }
         }
 
-        IEnumerator Spark(SpriteRenderer sr, Vector3 from, Vector3 to)
+        IEnumerator Spark(Transform t, Vector3 from, Vector3 velocity)
         {
-            var c = sr.color;
-            float s = sr.transform.localScale.x;
-            yield return Ease.Tween(0.35f, t =>
+            float s = t.localScale.x;
+            var spin = Random.rotation;
+            yield return Ease.Tween(0.45f, k =>
             {
-                sr.transform.localPosition = Vector3.LerpUnclamped(from, to, t);
-                sr.transform.localScale = Vector3.one * s * (1f - t);
-                sr.color = WithAlpha(c, 1f - t);
-            }, Ease.OutCubic, unscaled: false);
-            Destroy(sr.gameObject);
+                // A short ballistic arc that shrinks away.
+                t.localPosition = from + velocity * k * 1.6f + Vector3.down * (k * k * 1.2f);
+                t.localRotation = Quaternion.Slerp(Quaternion.identity, spin, k);
+                t.localScale = Vector3.one * s * (1f - k);
+            }, Ease.Linear, unscaled: false);
+            Destroy(t.gameObject);
         }
-
-        void Segment(Transform parent, Vector3 a, Vector3 b)
-        {
-            var mid = (a + b) * 0.5f;
-            var d = b - a;
-            var sr = Quad(parent, "Line", squareSprite, Palette.Sogan, mid, new Vector3(d.magnitude, 0.07f, 1f), 3);
-            sr.transform.localRotation = Quaternion.Euler(0f, 0f, Mathf.Atan2(d.y, d.x) * Mathf.Rad2Deg);
-        }
-
-        SpriteRenderer Quad(Transform parent, string name, Sprite sprite, Color color, Vector3 pos, Vector3 scale, int order)
-        {
-            var go = new GameObject(name);
-            go.transform.SetParent(parent, false);
-            go.transform.localPosition = pos;
-            go.transform.localScale = scale;
-            var sr = go.AddComponent<SpriteRenderer>();
-            sr.sprite = sprite; sr.sharedMaterial = spriteMaterial; sr.color = color; sr.sortingOrder = order;
-            return sr;
-        }
-
-        static Color WithAlpha(Color c, float a) => new Color(c.r, c.g, c.b, a);
     }
 }
