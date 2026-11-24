@@ -103,7 +103,7 @@ namespace Pamor
         public void ShowDestinations(IEnumerable<int> points)
         {
             ClearDestinations();
-            var glow = Mats.Lit(Palette.AccentPrada, 0.5f, 0f, 2.5f);
+            var glow = Mats.Lit(Palette.AccentPrada, 0.5f, 0f, 1.3f);
             foreach (var p in points)
                 destinationMarkers.Add(Disc(hintsRoot, "Dest " + BoardGraph.Name(p), glow, ToLocal(p), 0.42f, 0.03f));
         }
@@ -117,7 +117,7 @@ namespace Pamor
         public void ShowMustCapture(IEnumerable<int> points)
         {
             ClearMustCapture();
-            var glow = Mats.Lit(Palette.AccentPrada, 0.5f, 0f, 1.6f);
+            var glow = Mats.Lit(Palette.AccentPrada, 0.5f, 0f, 0.9f);
             foreach (var p in points)
                 mustCaptureRings.Add(Disc(hintsRoot, "Must " + BoardGraph.Name(p), glow, ToLocal(p), 1.2f, 0.016f));
         }

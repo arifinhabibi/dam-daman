@@ -247,7 +247,7 @@ MonoBehaviour:
     m_Value: 0
   OutputChannel: 1
   StandbyUpdate: 2
-  m_StreamingVersion: 0
+  m_StreamingVersion: 20241001
   m_LegacyPriority: 0
   Target:
     TrackingTarget: {fileID: 921075683}
@@ -281,8 +281,8 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 43567904}
   serializedVersion: 2
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalRotation: {x: 0.1521234, y: 0, z: 0, w: 0.98836154}
+  m_LocalPosition: {x: 0, y: 4.510587, z: -14.305755}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -354,6 +354,7 @@ MonoBehaviour:
   maxTiltFromTop: 40
   startTiltFromTop: 28
   startYaw: 90
+  radius: 21.5
   degreesPerPixel: 0.25
   zoomRange: {x: 0.75, y: 1.35}
 --- !u!1 &306931949
@@ -521,7 +522,7 @@ Camera:
   far clip plane: 200
   field of view: 40
   orthographic: 0
-  orthographic size: 6
+  orthographic size: 10
   m_Depth: -1
   m_CullingMask:
     serializedVersion: 2
@@ -545,8 +546,8 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 519420028}
   serializedVersion: 2
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 0, z: -10}
+  m_LocalRotation: {x: 0.1521234, y: 0, z: 0, w: 0.98836154}
+  m_LocalPosition: {x: 0, y: 4.510587, z: -14.305755}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []

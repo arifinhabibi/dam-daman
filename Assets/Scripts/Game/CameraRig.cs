@@ -17,6 +17,8 @@ namespace Pamor
         public float startTiltFromTop = 28f;
         [Tooltip("Starting yaw: 90 puts the camera behind Hitam, so the player's own pieces are at the bottom of the screen.")]
         public float startYaw = 90f;
+        [Tooltip("Orbit distance from the board centre at zoom 1. Frames the whole board on a ~2:1 phone screen.")]
+        public float radius = 21.5f;
         public float degreesPerPixel = 0.25f;
         public Vector2 zoomRange = new Vector2(0.75f, 1.35f);
 
@@ -31,6 +33,7 @@ namespace Pamor
             orbit.HorizontalAxis.Range = new Vector2(-180f, 180f);
             orbit.HorizontalAxis.Wrap = true;
             orbit.RadialAxis.Range = zoomRange;
+            orbit.Radius = radius;
             ResetView();
         }
 
