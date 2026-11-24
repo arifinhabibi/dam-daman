@@ -1,0 +1,39 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 96809a3c558d299498332e47dfc1e438, type: 3}
+  m_Name: CommanderArt
+  m_EditorClassIdentifier: Pamor.Game::Pamor.CommanderArt
+  entries:
+  - commander: 0
+    model: {fileID: 0}
+    scale: 1
+    rotationOffset: {x: 0, y: 0, z: 0}
+  - commander: 1
+    model: {fileID: 0}
+    scale: 1
+    rotationOffset: {x: 0, y: 0, z: 0}
+  - commander: 2
+    model: {fileID: 0}
+    scale: 1
+    rotationOffset: {x: 0, y: 0, z: 0}
+  - commander: 3
+    model: {fileID: 0}
+    scale: 1
+    rotationOffset: {x: 0, y: 0, z: 0}
+  - commander: 4
+    model: {fileID: 0}
+    scale: 1
+    rotationOffset: {x: 0, y: 0, z: 0}
+  - commander: 5
+    model: {fileID: 0}
+    scale: 1
+    rotationOffset: {x: 0, y: 0, z: 0}

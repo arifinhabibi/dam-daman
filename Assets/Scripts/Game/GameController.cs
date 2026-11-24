@@ -279,6 +279,7 @@ namespace Pamor
 
         IEnumerator PlayCast(CastResult result)
         {
+            AvatarOf(result.Caster).Play(CommanderArt.Cast);
             hud.AddLog($"{(result.Caster == Side.Hitam ? "<color=#D9A441>H</color>" : "<color=#C0553F>M</color>")} ajian {AjianBook.Name(result.Ajian)}");
             bool wasBusy = Busy;
             Busy = true;
@@ -352,6 +353,8 @@ namespace Pamor
                       + (targets.Length > 0 ? " on " + string.Join(",", targets.Select(BoardGraph.Name)) : "")
                       + (result.CapturedPieces.Count > 0 ? $" [{string.Join(",", result.CapturedPieces.Select(p => p.Role.ToString()))}]" : ""));
             hud.NudgeHint(CommanderBook.ActiveName(result.Active.Value).ToUpperInvariant() + "!");
+            AvatarOf(caster).Play(CommanderArt.Cast);
+            if (result.CapturedPieces.Count > 0) AvatarOf(enemy).Play(CommanderArt.Hit);
             hud.AddLog($"{(caster == Side.Hitam ? "<color=#D9A441>H</color>" : "<color=#C0553F>M</color>")} {CommanderBook.ActiveName(result.Active.Value)}"
                        + (result.CapturedPieces.Count > 0 ? $" makan {result.CapturedPieces.Count}" : ""));
             hud.FlashAccent();
@@ -392,6 +395,11 @@ namespace Pamor
             hud.HideCommander();
             hud.HideAjian();
             hud.SetTimer(-1);
+            if (Winner.HasValue)
+            {
+                AvatarOf(Winner.Value).Play(CommanderArt.Victory);
+                AvatarOf(Board.Other(Winner.Value)).Play(CommanderArt.Defeat);
+            }
             EnterState(GameState.Ended);
             StartCoroutine(hud.PlayEnd(EndBanner(), MovesPlayed));
             if (Mode == MatchMode.Sayembara && lobby != null) StartCoroutine(AfterRoundMatch());
@@ -438,6 +446,8 @@ namespace Pamor
                       + (result.Shield >= 0 ? $" (perisai {BoardGraph.Name(result.Shield)})" : "")
                       + (result.BonusMove ? " (combo)" : ""));
             hud.AddLog(LogLine(mover, move, result));
+            if (result.CapturedPieces.Count > 0) AvatarOf(Board.Other(mover)).Play(CommanderArt.Hit);
+            else if (result.Burned >= 0) AvatarOf(mover).Play(CommanderArt.Hit);
             yield return boardView.PlayMove(result);
             if (result.PatihRevived >= 0) boardView.Build(Board); // Pancasona: the Patih reappears at its start
             boardView.RefreshRoles(Board, Viewer);
@@ -543,8 +553,29 @@ namespace Pamor
             list.AddRange(centre.Take(CommanderBook.SangkuriangBlockers));
         }
 
+        CommanderAvatar[] avatars;
+
+        CommanderAvatar AvatarOf(Side s)
+        {
+            if (avatars == null)
+            {
+                var root = new GameObject("Commanders").transform;
+                root.SetParent(transform, false);
+                avatars = new CommanderAvatar[2];
+                for (int i = 0; i < 2; i++)
+                {
+                    var go = new GameObject(i == 0 ? "Hitam Commander" : "Merah Commander");
+                    go.transform.SetParent(root, false);
+                    avatars[i] = go.AddComponent<CommanderAvatar>();
+                }
+            }
+            return avatars[s == Side.Hitam ? 0 : 1];
+        }
+
         void ApplyCommandersAndBlockers(Board board)
         {
+            AvatarOf(Side.Hitam).Show(Side.Hitam, commanders[0]);
+            AvatarOf(Side.Merah).Show(Side.Merah, commanders[1]);
             foreach (var side in new[] { Side.Hitam, Side.Merah })
             {
                 board.SetCommander(side, commanders[SideIndex(side)]);
