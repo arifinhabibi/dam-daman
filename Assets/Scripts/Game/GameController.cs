@@ -1,5 +1,6 @@
 using System.Collections;
 using System.Linq;
+using System.Threading.Tasks;
 using Pamor.Core;
 using UnityEngine;
 using UnityEngine.InputSystem;
@@ -7,36 +8,53 @@ using UnityEngine.InputSystem;
 namespace Pamor
 {
     public enum GameState { Title, Playing, Paused, Ended }
+    public enum MatchMode { LocalPvP, VsAi }
 
     /// <summary>
-    /// Local PvP (hotseat) match: owns the rules state, the shell state machine and pointer input.
-    /// Works with mouse and touch through the Input System's Pointer.
+    /// Owns one match: rules state, shell state machine, pointer input and the AI opponent.
+    /// Local PvP is hotseat on one device; vs AI the player is Hitam (moves first) and the AI is Merah.
     /// </summary>
     public class GameController : MonoBehaviour
     {
+        const string DifficultyPref = "pamor.difficulty";
+        const float MinAiThinkSeconds = 0.6f;
+
         [SerializeField] BoardView boardView;
         [SerializeField] HudView hud;
 
         public GameState State { get; private set; } = GameState.Title;
+        public MatchMode Mode { get; private set; } = MatchMode.LocalPvP;
+        public Difficulty AiDifficulty { get; private set; } = Difficulty.Sedang;
+        public Side AiSide => Side.Merah;
         public Board Board { get; private set; }
         public int MovesPlayed { get; private set; }
         public Side? Winner { get; private set; }
+        public bool IsDraw { get; private set; }
         public bool Busy { get; private set; }
+        public bool AiThinking { get; private set; }
 
         readonly Rules rules = Rules.Default;
         Square? selected;
         Camera cam;
         Coroutine turnRoutine;
         bool transitioning;
+        int matchId;
+
+        bool IsAiTurn => Mode == MatchMode.VsAi && Board.ToMove == AiSide;
 
         void Start()
         {
             cam = Camera.main;
+            AiDifficulty = (Difficulty)Mathf.Clamp(PlayerPrefs.GetInt(DifficultyPref, (int)Difficulty.Sedang), 0, 2);
             hud.Build();
+            hud.SetDifficulty(AiDifficulty);
             hud.ResumePressed += () => SetPaused(false);
             hud.PausePressed += () => SetPaused(true);
-            hud.RestartPressed += () => BeginTransition(GameState.Playing);
-            hud.TitlePressed += () => BeginTransition(GameState.Title);
+            hud.RestartPressed += () => BeginTransition(GameState.Playing, Mode);
+            hud.TitlePressed += () => BeginTransition(GameState.Title, Mode);
+            hud.PlayLocalPressed += () => BeginTransition(GameState.Playing, MatchMode.LocalPvP);
+            hud.PlayAiPressed += () => BeginTransition(GameState.Playing, MatchMode.VsAi);
+            hud.DifficultyPressed += CycleDifficulty;
             ResetMatch();
             EnterState(GameState.Title);
         }
@@ -51,10 +69,7 @@ namespace Pamor
 
             var pointer = Pointer.current;
             if (pointer == null || !pointer.press.wasPressedThisFrame) return;
-
-            if (transitioning) return;
-            if (State == GameState.Title) { BeginTransition(GameState.Playing); return; }
-            if (State != GameState.Playing || Busy) return;
+            if (transitioning || State != GameState.Playing || Busy || IsAiTurn) return;
 
             var screen = pointer.position.ReadValue();
             var world = cam.ScreenToWorldPoint(new Vector3(screen.x, screen.y, -cam.transform.position.z));
@@ -62,10 +77,17 @@ namespace Pamor
             else Deselect();
         }
 
+        public void CycleDifficulty()
+        {
+            AiDifficulty = (Difficulty)(((int)AiDifficulty + 1) % 3);
+            PlayerPrefs.SetInt(DifficultyPref, (int)AiDifficulty);
+            hud.SetDifficulty(AiDifficulty);
+        }
+
         /// <summary>Handles a tap on a board square; public so it can be driven from tests and the CLI.</summary>
         public void Tap(Square square)
         {
-            if (State != GameState.Playing || Busy) return;
+            if (State != GameState.Playing || Busy || IsAiTurn) return;
             var legal = rules.LegalMoves(Board);
 
             if (selected.HasValue)
@@ -118,31 +140,68 @@ namespace Pamor
         IEnumerator PlayTurn(Move move)
         {
             Busy = true;
+            var mover = Board.ToMove;
             boardView.PieceAt(move.From)?.SetSelected(false);
             selected = null;
             var result = Board.Apply(move);
             MovesPlayed++;
-            Debug.Log($"[Pamor] {(Board.ToMove == Side.Hitam ? "Merah" : "Hitam")} {move}{(result.Promoted ? " = Dam" : "")}");
+            Debug.Log($"[Pamor] {mover}{(Mode == MatchMode.VsAi && mover == AiSide ? " (AI)" : "")} {move}{(result.Promoted ? " = Dam" : "")}");
             yield return boardView.PlayMove(move, result.Promoted);
             hud.SetCounts(Board.CountPieces(Side.Hitam), Board.CountPieces(Side.Merah));
 
             Winner = rules.Winner(Board);
+            IsDraw = !Winner.HasValue && rules.IsDraw(Board);
             Busy = false;
-            if (Winner.HasValue)
+            if (Winner.HasValue || IsDraw)
             {
-                Debug.Log($"[Pamor] {Winner} wins after {MovesPlayed} moves");
+                Debug.Log($"[Pamor] {(IsDraw ? "draw" : Winner + " wins")} after {MovesPlayed} moves");
                 EnterState(GameState.Ended);
-                yield return hud.PlayWin(Winner.Value, MovesPlayed);
+                yield return hud.PlayEnd(EndBanner(), MovesPlayed);
                 yield break;
             }
             RefreshTurnHints();
+            if (IsAiTurn) turnRoutine = StartCoroutine(AiTurn());
+        }
+
+        /// <summary>Searches on a worker thread so the frame never hitches, with a short minimum "thinking" beat.</summary>
+        IEnumerator AiTurn()
+        {
+            Busy = true;
+            AiThinking = true;
+            int id = matchId;
+            var snapshot = Board.Clone();
+            var ai = Ai.For(AiDifficulty);
+            var task = Task.Run(() => ai.ChooseMove(snapshot));
+            float started = Time.time;
+            while (!task.IsCompleted || Time.time - started < MinAiThinkSeconds) yield return null;
+            AiThinking = false;
+            if (id != matchId) yield break; // the match was reset while the AI was thinking
+
+            if (task.IsFaulted || task.Result == null)
+            {
+                Debug.LogError("[Pamor] AI failed to choose a move: " + task.Exception);
+                Busy = false;
+                yield break;
+            }
+            yield return PlayTurn(task.Result);
+        }
+
+        string EndBanner()
+        {
+            if (IsDraw) return "SERI";
+            if (Mode == MatchMode.VsAi) return Winner == AiSide ? "AI MENANG" : "KAMU MENANG";
+            return Winner == Side.Hitam ? "HITAM MENANG" : "MERAH MENANG";
         }
 
         void RefreshTurnHints()
         {
             bool mustCapture = rules.HasAnyCapture(Board);
-            hud.SetTurn(Board.ToMove, mustCapture);
-            if (mustCapture) boardView.ShowMustCapture(rules.LegalMoves(Board).Select(m => m.From).Distinct());
+            string label;
+            if (Mode == MatchMode.VsAi) label = IsAiTurn ? "GILIRAN AI" : "GILIRANMU";
+            else label = Board.ToMove == Side.Hitam ? "GILIRAN HITAM" : "GILIRAN MERAH";
+            string hint = IsAiTurn ? "AI BERPIKIR..." : mustCapture ? "WAJIB MAKAN!" : "";
+            hud.SetTurn(Board.ToMove, label, hint);
+            if (mustCapture && !IsAiTurn) boardView.ShowMustCapture(rules.LegalMoves(Board).Select(m => m.From).Distinct());
             else boardView.ClearMustCapture();
         }
 
@@ -151,13 +210,18 @@ namespace Pamor
         {
             if (turnRoutine != null) StopCoroutine(turnRoutine);
             turnRoutine = null;
+            matchId++;
             Busy = false;
+            AiThinking = false;
             Board = Board.CreateStandard();
             MovesPlayed = 0;
             Winner = null;
+            IsDraw = false;
             selected = null;
             boardView.Build(Board);
             hud.SetCounts(12, 12);
+            if (Mode == MatchMode.VsAi) hud.SetPlayerNames("KAMU", "AI " + AiDifficulty.ToString().ToUpperInvariant());
+            else hud.SetPlayerNames("HITAM", "MERAH");
             RefreshTurnHints();
         }
 
@@ -175,21 +239,23 @@ namespace Pamor
             hud.ShowScreen(next);
         }
 
-        void BeginTransition(GameState next)
+        public void BeginTransition(GameState next, MatchMode mode)
         {
             if (transitioning) return;
-            StartCoroutine(Transition(next));
+            StartCoroutine(Transition(next, mode));
         }
 
-        IEnumerator Transition(GameState next)
+        IEnumerator Transition(GameState next, MatchMode mode)
         {
             transitioning = true;
             yield return hud.FadeOut();
             Time.timeScale = 1f;
+            Mode = mode;
             ResetMatch();
             EnterState(next);
             yield return hud.FadeIn();
             transitioning = false;
+            if (State == GameState.Playing && IsAiTurn) turnRoutine = StartCoroutine(AiTurn());
         }
     }
 }

@@ -36,6 +36,9 @@ namespace Pamor.Core
 
         public Side ToMove { get; private set; } = Side.Hitam;
 
+        /// <summary>Turns in a row with no capture and no man moved (only Dams shuffling); drives the draw rule.</summary>
+        public int QuietMoves { get; private set; }
+
         public int this[Square s]
         {
             get => cells[s.Row, s.Col];
@@ -61,7 +64,7 @@ namespace Pamor.Core
 
         public Board Clone()
         {
-            var b = new Board { ToMove = ToMove };
+            var b = new Board { ToMove = ToMove, QuietMoves = QuietMoves };
             Array.Copy(cells, b.cells, cells.Length);
             return b;
         }
@@ -93,6 +96,7 @@ namespace Pamor.Core
             int piece = this[move.From];
             if (Owner(piece) != ToMove) throw new InvalidOperationException($"No {ToMove} piece on {move.From}.");
 
+            QuietMoves = move.IsCapture || !IsDam(piece) ? 0 : QuietMoves + 1;
             this[move.From] = 0;
             foreach (var cap in move.Captured) this[cap] = 0;
 

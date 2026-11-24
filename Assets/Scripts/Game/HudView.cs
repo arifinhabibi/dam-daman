@@ -16,10 +16,11 @@ namespace Pamor
     public class HudView : MonoBehaviour
     {
         public event Action ResumePressed, RestartPressed, TitlePressed, PausePressed;
+        public event Action PlayLocalPressed, PlayAiPressed, DifficultyPressed;
 
         RectTransform root;
         GameObject hud, title, pause, ended;
-        TextMeshProUGUI turnText, hintText, hitamCount, merahCount, endedBanner, endedStats, titlePrompt;
+        TextMeshProUGUI turnText, hintText, hitamCount, merahCount, hitamName, merahName, endedBanner, endedStats, difficultyLabel;
         Image turnDisc, fade, flash;
         RectTransform endedBannerRect, hintPanel;
         Coroutine hintRoutine;
@@ -57,10 +58,12 @@ namespace Pamor
             hintPanel.parent.gameObject.SetActive(false);
 
             var left = FramedPanel(hud.transform, "Hitam Info", new Vector2(0f, 0.5f), new Vector2(170, 0), new Vector2(240, 160));
-            Text(left, "Name", "HITAM", 34, Palette.Kelir, new Vector2(0.5f, 1f), new Vector2(0, -40), new Vector2(220, 50)).characterSpacing = 6;
+            hitamName = Text(left, "Name", "HITAM", 34, Palette.Kelir, new Vector2(0.5f, 1f), new Vector2(0, -40), new Vector2(220, 50));
+            hitamName.characterSpacing = 6;
             hitamCount = Text(left, "Count", "12", 64, Palette.AccentPrada, new Vector2(0.5f, 0f), new Vector2(0, 50), new Vector2(220, 80));
             var right = FramedPanel(hud.transform, "Merah Info", new Vector2(1f, 0.5f), new Vector2(-170, 0), new Vector2(240, 160));
-            Text(right, "Name", "MERAH", 34, Palette.Kelir, new Vector2(0.5f, 1f), new Vector2(0, -40), new Vector2(220, 50)).characterSpacing = 6;
+            merahName = Text(right, "Name", "MERAH", 34, Palette.Kelir, new Vector2(0.5f, 1f), new Vector2(0, -40), new Vector2(220, 50));
+            merahName.characterSpacing = 6;
             merahCount = Text(right, "Count", "12", 64, Palette.AccentPrada, new Vector2(0.5f, 0f), new Vector2(0, 50), new Vector2(220, 80));
 
             var pauseBtn = Button(hud.transform, "Pause Button", "II", new Vector2(1f, 1f), new Vector2(-80, -70), new Vector2(96, 96), () => PausePressed?.Invoke());
@@ -74,8 +77,11 @@ namespace Pamor
             var shadow = name.gameObject.AddComponent<Shadow>();
             shadow.effectColor = Palette.Shadow; shadow.effectDistance = new Vector2(6, -6);
             Text(title.transform, "Subtitle", "DAM-DAMAN NUSANTARA", 40, WithAlpha(Palette.Kelir, 0.85f), new Vector2(0.5f, 0.6f), new Vector2(0, -150), new Vector2(1200, 60)).characterSpacing = 18;
-            titlePrompt = Text(title.transform, "Prompt", "KETUK UNTUK MULAI", 34, WithAlpha(Palette.Kelir, 0.7f), new Vector2(0.5f, 0.25f), Vector2.zero, new Vector2(1000, 60));
-            titlePrompt.characterSpacing = 20;
+            Button(title.transform, "Play Local", "LAWAN TEMAN", new Vector2(0.5f, 0.3f), new Vector2(-250, 0), new Vector2(460, 96), () => PlayLocalPressed?.Invoke());
+            Button(title.transform, "Play AI", "LAWAN AI", new Vector2(0.5f, 0.3f), new Vector2(250, 0), new Vector2(460, 96), () => PlayAiPressed?.Invoke());
+            var diff = Button(title.transform, "Difficulty", "TINGKAT AI: SEDANG", new Vector2(0.5f, 0.3f), new Vector2(250, -112), new Vector2(460, 76), () => DifficultyPressed?.Invoke());
+            difficultyLabel = diff.GetComponentInChildren<TextMeshProUGUI>();
+            difficultyLabel.fontSize = 28;
 
             // --- Pause
             pause = Panel(root, "Pause", WithAlpha(Palette.Shadow, 0.75f), Vector2.zero, Vector2.one).gameObject;
@@ -99,13 +105,17 @@ namespace Pamor
             fade.raycastTarget = false;
         }
 
-        void Update()
+        public void SetDifficulty(Difficulty d)
         {
-            if (title != null && title.activeSelf)
-            {
-                float k = 0.5f + 0.5f * Mathf.Sin(Time.unscaledTime * 2f * Mathf.PI / 1.6f);
-                titlePrompt.alpha = Mathf.Lerp(0.5f, 1f, k);
-            }
+            difficultyLabel.text = "TINGKAT AI: " + d.ToString().ToUpperInvariant();
+            var t = difficultyLabel.transform;
+            StartCoroutine(Ease.Tween(0.25f, k => t.localScale = Vector3.one * Mathf.LerpUnclamped(1.2f, 1f, k), Ease.OutBack));
+        }
+
+        public void SetPlayerNames(string hitam, string merah)
+        {
+            hitamName.text = hitam;
+            merahName.text = merah;
         }
 
         public void ShowScreen(GameState state)
@@ -119,11 +129,11 @@ namespace Pamor
         public IEnumerator FadeOut() => Ease.Tween(0.15f, t => fade.color = WithAlpha(Palette.Shadow, t), Ease.OutCubic);
         public IEnumerator FadeIn() => Ease.Tween(0.15f, t => fade.color = WithAlpha(Palette.Shadow, 1f - t), Ease.OutCubic);
 
-        public void SetTurn(Side side, bool mustCapture)
+        public void SetTurn(Side side, string label, string hint)
         {
-            turnText.text = side == Side.Hitam ? "GILIRAN HITAM" : "GILIRAN MERAH";
+            turnText.text = label;
             turnDisc.color = side == Side.Hitam ? Palette.PieceA : Palette.PieceB;
-            SetHint(mustCapture ? "WAJIB MAKAN!" : "");
+            SetHint(hint);
         }
 
         void SetHint(string text)
@@ -148,9 +158,9 @@ namespace Pamor
         }
 
         /// <summary>The win moment: flash, then the banner scales in with an overshoot.</summary>
-        public IEnumerator PlayWin(Side winner, int moves)
+        public IEnumerator PlayEnd(string banner, int moves)
         {
-            endedBanner.text = winner == Side.Hitam ? "HITAM MENANG" : "MERAH MENANG";
+            endedBanner.text = banner;
             endedBanner.color = Palette.AccentPrada;
             endedStats.text = $"{moves} LANGKAH";
             endedBannerRect.localScale = Vector3.zero;

@@ -12,11 +12,17 @@ namespace Pamor.Core
     /// - Captured pieces are removed when the turn ends and can't be jumped twice in one chain.
     /// - A man promotes to Dam only when its move ends on the far row.
     /// - A side with no legal move (including no pieces) loses.
+    /// - Draw after DrawQuietMoveLimit turns with only Dams moving and no capture.
     /// </summary>
     public sealed class Rules
     {
         public bool MenCaptureBackward = true;
         public bool FlyingDam = true;
+
+        /// <summary>Draw ("seri") after this many turns in a row with only Dams moving and nothing captured (25 each).</summary>
+        public int DrawQuietMoveLimit = 50;
+
+        public bool IsDraw(Board board) => board.QuietMoves >= DrawQuietMoveLimit;
 
         static readonly (int dr, int dc)[] Diagonals = { (1, 1), (1, -1), (-1, 1), (-1, -1) };
 
