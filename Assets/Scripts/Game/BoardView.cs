@@ -5,17 +5,30 @@ using UnityEngine;
 
 namespace Pamor
 {
+    // BELAJAR UNITY - ARSITEKTUR PROYEK INI (penting dipahami dulu):
+    //   Core/  = aturan permainan, C# murni, TIDAK memakai Unity. Tahu apa yang boleh dan tidak,
+    //            tapi tidak punya konsep "layar" atau "animasi". Bisa dites tanpa membuka game.
+    //   Game/  = bagian Unity: menggambar papan, bidak, UI, menerima sentuhan.
+    // BoardView adalah "juru gambar" papan. Ia diberi data Board dari Core lalu membangun
+    // GameObject-nya (garis, titik, bidak) dan memainkan animasinya. Dia TIDAK memutuskan
+    // langkah mana yang sah, itu tugas Core.Rules.
+    //
+    // Sumbu dunia 3D Unity: X = kanan, Y = ATAS, Z = depan. Papan terletak mendatar di bidang
+    // X-Z, jadi titik papan (kolom, baris) dipetakan ke (x, z) di fungsi ToLocal di bawah.
+
     /// <summary>
     /// The 3D dam-daman board: a wooden tray with a gold inlay and a kelir-coloured playing surface,
     /// carved lines and points, and the pieces. Board points lie on the XZ plane at y = 0.
     /// </summary>
     public class BoardView : MonoBehaviour
     {
-        public const float Spacing = 1.5f;
-        const float SurfaceY = 0.02f;
+        public const float Spacing = 1.5f;     // jarak antar titik papan, dalam satuan Unity (1 satuan ~ 1 meter)
+        const float SurfaceY = 0.02f;          // tinggi permukaan papan (sedikit di atas 0 agar tidak berimpit dengan alas)
 
+        // Field public bertipe [Serializable] -> bisa diubah di Inspector saat game jalan.
         public FeelTunables feel = new FeelTunables();
 
+        // Dictionary: nomor titik papan -> PieceView bidak yang berdiri di titik itu.
         readonly Dictionary<int, PieceView> pieces = new Dictionary<int, PieceView>();
         readonly List<Transform> destinationMarkers = new List<Transform>();
         readonly List<Transform> mustCaptureRings = new List<Transform>();
@@ -28,9 +41,16 @@ namespace Pamor
         /// <summary>The board point nearest where a screen ray meets the board, if it is within reach.</summary>
         public bool TryGetPoint(Ray worldRay, out int point)
         {
+            // BELAJAR UNITY - SENTUHAN KE POSISI 3D:
+            // Layar itu 2D, tapi papannya di dunia 3D. Camera.ScreenPointToRay mengubah titik layar
+            // yang disentuh menjadi sebuah RAY (sinar) yang menembus dunia dari kamera.
+            // Lalu kita tanya: di mana sinar itu memotong bidang papan? (Plane.Raycast)
+            // Hasilnya titik 3D di papan, dan kita cari titik papan terdekat darinya.
+            // Cara ini tidak butuh Collider dan jauh lebih ringan daripada Physics.Raycast.
             point = -1;
             var plane = new Plane(transform.up, transform.TransformPoint(new Vector3(0, SurfaceY, 0)));
-            if (!plane.Raycast(worldRay, out float enter)) return false;
+            if (!plane.Raycast(worldRay, out float enter)) return false;     // sinar sejajar bidang: tidak memotong
+            // InverseTransformPoint: ubah posisi DUNIA menjadi posisi LOKAL (relatif terhadap papan).
             var local = transform.InverseTransformPoint(worldRay.GetPoint(enter));
             float best = Spacing * 0.5f;
             for (int p = 0; p < BoardGraph.PointCount; p++)
@@ -235,6 +255,9 @@ namespace Pamor
             mustCaptureRings.Clear();
         }
 
+        // Update() dipanggil Unity SETIAP frame. Di sini dipakai untuk animasi yang terus-menerus:
+        // tanda tujuan dan cincin "wajib makan" berdenyut membesar-mengecil.
+        // Time.time = detik sejak game mulai (berhenti saat pause, jadi denyutnya ikut berhenti).
         void Update()
         {
             // Hints pulse so they read as interactive; scaled time, so they freeze under pause.
@@ -246,6 +269,11 @@ namespace Pamor
         }
 
         /// <summary>Plays a move and its turn-end effects: hops, captures, promotion, burn, demotion.</summary>
+        // Inilah contoh nyata kenapa Coroutine berguna: satu langkah bisa berupa beberapa lompatan
+        // berantai (makan beruntun). "yield return view.Hop(...)" MENUNGGU lompatan itu selesai
+        // sebelum lanjut ke baris berikutnya, tanpa membekukan game. Tanpa coroutine kita harus
+        // menulis mesin status rumit untuk melacak "sekarang lompatan ke berapa".
+        // GameController menunggu fungsi ini dengan "yield return boardView.PlayMove(result)".
         public IEnumerator PlayMove(MoveResult result)
         {
             var move = result.Move;
@@ -320,6 +348,9 @@ namespace Pamor
             StartCoroutine(victim.Captured());
         }
 
+        // Percikan dibuat dari kubus-kubus kecil yang dihancurkan sendiri setelah animasinya selesai.
+        // Untuk efek yang lebih banyak dan rumit, Unity punya Particle System (komponen khusus
+        // efek partikel); di sini cukup objek sederhana supaya mudah dipahami.
         void Burst(Vector3 at, Color color, int count = -1)
         {
             if (count < 0) count = feel.captureParticles;

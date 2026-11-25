@@ -9,12 +9,29 @@ using UnityEngine.UI;
 
 namespace Pamor
 {
+    // BELAJAR UNITY - UI (uGUI):
+    // UI Unity dibuat dari GameObject di bawah sebuah CANVAS (kanvas). Setiap elemen punya
+    // RectTransform (pengganti Transform untuk UI) dan komponen gambar: Image (kotak/gambar),
+    // TextMeshProUGUI (teks tajam), Button (bisa ditekan). Biasanya semua ini disusun dengan
+    // menyeret di Editor. Di proyek ini sengaja DIBANGUN LEWAT KODE (lihat fungsi Panel, Img,
+    // Text, Button di bagian bawah file) supaya seluruh tampilan terkendali dari satu tempat dan
+    // warna selalu diambil dari Palette. Untuk belajar, cobalah juga membuat satu tombol lewat
+    // menu GameObject > UI > Button di Editor dan bandingkan hasilnya.
+    //
+    // HudView hanya MENAMPILKAN dan MELAPORKAN tombol yang ditekan lewat event (di bawah).
+    // Ia tidak tahu aturan permainan; GameController yang memutuskan apa yang terjadi.
+    //
+    // "partial class": kelas ini dipecah di HudView.cs (layar-layar) dan HudView.Match.cs (HUD saat match).
+
     /// <summary>
     /// uGUI + TextMeshPro screens, built at runtime from the palette: the in-match HUD plus the
     /// Title, Pause and Ended overlays, and one fade overlay for transitions.
     /// </summary>
     public partial class HudView : MonoBehaviour
     {
+        // "event Action" = pengumuman yang bisa didengar pihak lain (publish/subscribe).
+        // Saat tombol ditekan, kita panggil "ResumePressed?.Invoke()"; tanda "?" berarti
+        // "hanya kalau ada yang mendengarkan". GameController mendaftar di Start().
         public event Action ResumePressed, RestartPressed, TitlePressed, PausePressed;
         public event Action PlayLocalPressed, PlayAiPressed, DifficultyPressed, PlaySayembaraPressed;
         public event Action SetupRandomPressed, SetupReadyPressed, HandoffPressed;
@@ -41,19 +58,31 @@ namespace Pamor
 
         public void Build()
         {
+            // EventSystem wajib ada agar tombol UI bisa menerima klik/sentuhan. Kalau tidak ada,
+            // tombol terlihat tapi tidak merespons. InputSystemUIInputModule menghubungkannya
+            // dengan paket Input System yang dipakai proyek ini.
             if (FindAnyObjectByType<EventSystem>() == null)
             {
                 var es = new GameObject("EventSystem", typeof(EventSystem), typeof(InputSystemUIInputModule));
                 es.transform.SetParent(transform, false);
             }
 
+            // Canvas = "kertas" tempat semua UI digambar. new GameObject(nama, komponen...) langsung
+            // memasang komponen yang disebut: Canvas, CanvasScaler (menyesuaikan ukuran UI dengan
+            // layar), GraphicRaycaster (mendeteksi sentuhan pada UI).
             var canvasGo = new GameObject("HUD Canvas", typeof(Canvas), typeof(CanvasScaler), typeof(GraphicRaycaster));
             canvasGo.transform.SetParent(transform, false);
             var canvas = canvasGo.GetComponent<Canvas>();
+            // ScreenSpaceOverlay = UI digambar di atas segalanya, menempel ke layar (bukan di dunia 3D).
             canvas.renderMode = RenderMode.ScreenSpaceOverlay;
             var scaler = canvasGo.GetComponent<CanvasScaler>();
+            // PENTING UNTUK MOBILE: HP punya banyak ukuran layar. Dengan "ScaleWithScreenSize" kita
+            // mendesain di satu resolusi acuan (1920x1080) dan Unity membesarkan/mengecilkan UI
+            // mengikuti layar sebenarnya. Semua angka ukuran/posisi UI di file ini dalam satuan acuan itu.
             scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
             scaler.referenceResolution = new Vector2(1920, 1080);
+            // 0.5 = campuran lebar dan tinggi: layar yang lebih lebar atau lebih tinggi dari acuan
+            // tetap tampak seimbang.
             scaler.matchWidthOrHeight = 0.5f;
             root = (RectTransform)canvasGo.transform;
 
@@ -299,15 +328,26 @@ namespace Pamor
 
         static Color WithAlpha(Color c, float a) => new Color(c.r, c.g, c.b, a);
 
+        // BELAJAR UNITY - ANCHOR (jangkar) pada RectTransform, konsep UI terpenting:
+        // Posisi elemen UI diukur DARI TITIK JANGKARNYA pada induknya, bukan dari pojok kiri atas layar.
+        // Jangkar (0,0) = pojok kiri bawah induk, (1,1) = pojok kanan atas, (0.5,0.5) = tengah.
+        //  - anchorMin dan anchorMax BERBEDA -> elemen MELAR mengikuti induknya (fungsi Panel di bawah:
+        //    (0,0)-(1,1) artinya memenuhi seluruh induk, dipakai untuk latar layar penuh).
+        //  - anchorMin = anchorMax -> elemen berukuran TETAP dan menempel ke satu titik (fungsi Img, Text).
+        // Itulah sebabnya tombol "pause" tetap di pojok kiri atas di HP kecil maupun tablet besar.
+        // anchoredPosition = geseran dari jangkar; sizeDelta = lebar dan tinggi (dalam satuan acuan).
         static RectTransform Panel(Transform parent, string name, Color color, Vector2 anchorMin, Vector2 anchorMax)
         {
+            // typeof(RectTransform), typeof(Image): GameObject baru langsung dipasangi dua komponen ini.
             var go = new GameObject(name, typeof(RectTransform), typeof(Image));
             var rt = (RectTransform)go.transform;
             rt.SetParent(parent, false);
             rt.anchorMin = anchorMin; rt.anchorMax = anchorMax;
-            rt.offsetMin = rt.offsetMax = Vector2.zero;
+            rt.offsetMin = rt.offsetMax = Vector2.zero;    // tanpa tepi: pas dengan area jangkar
             var img = go.GetComponent<Image>();
             img.color = color;
+            // raycastTarget = apakah elemen ini MENANGKAP sentuhan. Latar transparan tidak boleh
+            // menangkapnya, kalau tidak, ia menghalangi sentuhan ke papan di belakangnya.
             img.raycastTarget = color.a > 0f;
             return rt;
         }
@@ -342,6 +382,9 @@ namespace Pamor
             rt.anchorMin = rt.anchorMax = anchor;
             rt.anchoredPosition = pos;
             rt.sizeDelta = box;
+            // TextMeshPro (TMP) = sistem teks modern Unity: lebih tajam dan fleksibel daripada
+            // komponen Text lama. Butuh "TMP Essential Resources" (font bawaan) yang sudah
+            // diimpor ke proyek; kalau belum, teks pertama akan error.
             var t = go.GetComponent<TextMeshProUGUI>();
             t.text = text; t.fontSize = size; t.color = color;
             t.alignment = TextAlignmentOptions.Center;
@@ -362,6 +405,9 @@ namespace Pamor
             colors.highlightedColor = new Color(1f, 0.92f, 0.75f);
             colors.pressedColor = new Color(0.8f, 0.7f, 0.5f);
             button.colors = colors;
+            // onClick = event bawaan Button. AddListener mendaftarkan fungsi yang dipanggil saat
+            // tombol ditekan. Di sini diteruskan ke "onClick" yang dikirim pemanggil (lihat event
+            // di bagian atas file, mis. PausePressed).
             button.onClick.AddListener(() => onClick());
             var t = Text(frame.transform, "Label", label, 38, Palette.Kelir, new Vector2(0.5f, 0.5f), Vector2.zero, size);
             t.characterSpacing = 10;

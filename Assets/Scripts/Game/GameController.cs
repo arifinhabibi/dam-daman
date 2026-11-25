@@ -8,8 +8,21 @@ using UnityEngine.InputSystem;
 
 namespace Pamor
 {
+    // BELAJAR UNITY - STATE MACHINE (mesin status):
+    // Game ini selalu berada di SATU "layar/status" pada satu waktu: judul, pilih Commander,
+    // menyusun pasukan, bermain, jeda, dst. Itu disimpan di enum GameState. Banyak kode di bawah
+    // berbunyi "kalau State bukan Playing, abaikan sentuhan ini". Ini pola yang sangat umum di game.
     public enum GameState { Title, CommanderSelect, Setup, Handoff, Playing, Paused, Ended, Sayembara }
     public enum MatchMode { LocalPvP, VsAi, Sayembara }
+
+    // BELAJAR UNITY - "PUSAT KENDALI":
+    // GameController adalah penghubung antara tiga bagian:
+    //   Core.Rules/Board  (aturan)  <-->  GameController  <-->  BoardView/HudView (tampilan)
+    // Alurnya: sentuhan pemain -> HandleGestures -> Tap(titik) -> minta Rules apa yang sah ->
+    // Rules.Apply mengubah Board -> BoardView.PlayMove menganimasikannya -> HudView memperbarui angka.
+    //
+    // "partial class": kelas ini dipecah ke beberapa file (GameController.cs dan
+    // GameController.Sayembara.cs) supaya file tidak terlalu panjang. Kompilator menggabungkannya.
 
     /// <summary>
     /// Owns one match: rules state, shell state machine, pointer input and the AI opponent.
@@ -17,13 +30,21 @@ namespace Pamor
     /// </summary>
     public partial class GameController : MonoBehaviour
     {
+        // PlayerPrefs = penyimpanan kecil bawaan Unity (nama -> angka/teks) yang bertahan setelah
+        // game ditutup. Dipakai untuk tingkat AI dan Pamor. Ini kuncinya.
         const string DifficultyPref = "pamor.difficulty";
         const float MinAiThinkSeconds = 0.6f;
 
+        // BELAJAR UNITY - REFERENSI DI INSPECTOR:
+        // [SerializeField] pada field private membuatnya muncul di Inspector. Kita seret objek
+        // dari scene ke slot ini (komponen BoardView, HudView, CameraRig di GameObject "Game").
+        // Unity mengisinya otomatis saat scene dimuat. Kalau slotnya kosong, nilainya null dan
+        // game akan error saat dipakai. Kalau error "NullReferenceException", periksa ini dulu.
         [SerializeField] BoardView boardView;
         [SerializeField] HudView hud;
         [SerializeField] CameraRig cameraRig;
 
+        // Properti { get; private set; }: luar boleh membaca, hanya kelas ini yang boleh menulis.
         public GameState State { get; private set; } = GameState.Title;
         public MatchMode Mode { get; private set; } = MatchMode.LocalPvP;
         public Difficulty AiDifficulty { get; private set; } = Difficulty.Sedang;
@@ -39,23 +60,30 @@ namespace Pamor
 
         /// <summary>There is an AI opponent (vs AI and Sayembara); it always plays Merah.</summary>
         bool HasAi => Mode != MatchMode.LocalPvP;
-        int? selected;
+        int? selected;               // "int?" = bisa berisi angka ATAU kosong (null): titik yang sedang dipilih, kalau ada
         Camera cam;
-        Coroutine turnRoutine;
+        Coroutine turnRoutine;       // coroutine giliran yang sedang jalan; disimpan supaya bisa dihentikan saat reset
         bool transitioning;
-        int matchId;
+        int matchId;                 // naik tiap match baru; dipakai untuk membatalkan hasil AI yang datang terlambat
 
         bool IsAiTurn => HasAi && Board.ToMove == AiSide;
 
         /// <summary>Whose eyes the board is drawn for: the player vs AI; the side to move in hotseat.</summary>
         Side Viewer => HasAi ? Board.Other(AiSide) : Board.ToMove;
 
+        // Start() dipanggil Unity SEKALI, tepat sebelum frame pertama. Dipakai untuk pengaturan awal.
+        // (Awake lebih awal lagi; Start dipakai di sini karena butuh komponen lain sudah siap.)
         void Start()
         {
             cam = Camera.main;
             AiDifficulty = (Difficulty)Mathf.Clamp(PlayerPrefs.GetInt(DifficultyPref, (int)Difficulty.Sedang), 0, 2);
             hud.Build();
             hud.SetDifficulty(AiDifficulty);
+            // BELAJAR UNITY - EVENT: HudView tidak tahu apa-apa soal aturan game. Ia hanya
+            // "berteriak" (event) saat tombol ditekan, dan di sini kita mendaftar untuk
+            // mendengarnya. "+=" artinya "tambahkan pendengar"; "() => ..." adalah lambda,
+            // yaitu fungsi kecil yang dijalankan saat event itu terjadi.
+            // Pola ini menjaga UI dan logika tetap terpisah.
             hud.ResumePressed += () => SetPaused(false);
             hud.PausePressed += () => SetPaused(true);
             // In Sayembara, leaving the match leaves the lobby.
@@ -77,8 +105,14 @@ namespace Pamor
             EnterState(GameState.Title);
         }
 
+        // Update() dipanggil Unity SETIAP frame. Di sini: baca masukan pemain dan jalankan timer.
+        // Hindari pekerjaan berat di Update (mis. mencari AI terbaik) karena akan membuat game patah-patah;
+        // untuk itu lihat AiTurn yang memakai thread terpisah.
         void Update()
         {
+            // BELAJAR UNITY - INPUT SYSTEM: proyek ini memakai paket "Input System" baru
+            // (UnityEngine.InputSystem), bukan Input.GetKey yang lama. "wasPressedThisFrame"
+            // bernilai true hanya pada frame tombol mulai ditekan.
             if (Keyboard.current != null && Keyboard.current.escapeKey.wasPressedThisFrame)
             {
                 if (State == GameState.Playing) SetPaused(true);
@@ -177,12 +211,17 @@ namespace Pamor
             // The turn moved on (timer, AI) while a piece was held: put it back.
             if (pieceDragging && ((State != GameState.Playing && State != GameState.Setup) || (State == GameState.Playing && Busy))) CancelPieceDrag();
 
+            // Pointer.current = "jari atau mouse yang sedang dipakai" (satu jalur untuk keduanya,
+            // jadi kode yang sama jalan di HP maupun di Editor dengan mouse).
+            // Gestur dihitung sendiri dari tiga momen: ditekan, ditahan, dilepas.
             var pointer = Pointer.current;
             if (pointer == null) return;
-            var pos = pointer.position.ReadValue();
+            var pos = pointer.position.ReadValue();    // posisi sentuhan di layar, dalam piksel
             if (pointer.press.wasPressedThisFrame)
             {
                 // Presses that start on a button or panel belong to the UI, not the board or camera.
+                // EventSystem = sistem Unity untuk klik pada UI. IsPointerOverGameObject() true
+                // kalau jari sedang di atas tombol/panel UI, jadi sentuhan itu bukan untuk papan.
                 var es = UnityEngine.EventSystems.EventSystem.current;
                 if (es != null && es.IsPointerOverGameObject()) { pressing = false; return; }
                 pressing = true; dragging = false;
@@ -498,6 +537,11 @@ namespace Pamor
             }
         }
 
+        // PlayTurn: satu giliran penuh, ditulis sebagai coroutine supaya urutannya terbaca seperti cerita:
+        //   1) tandai sibuk  2) (tanya Pancasona kalau perlu)  3) minta Rules menerapkan langkah ke Board
+        //   4) animasikan di layar  5) perbarui HUD  6) cek menang/seri  7) lanjut ke giliran berikutnya.
+        // Bagian penting: Rules.Apply mengubah DATA seketika; animasinya baru berjalan sesudahnya.
+        // "Busy = true" mengunci sentuhan selama animasi supaya pemain tidak bisa menekan hal lain.
         IEnumerator PlayTurn(Move move)
         {
             Busy = true;
@@ -756,17 +800,28 @@ namespace Pamor
         }
 
         /// <summary>Searches on a worker thread so the frame never hitches, with a short minimum "thinking" beat.</summary>
+        // BELAJAR UNITY - THREAD vs FRAME:
+        // Mencari langkah AI itu hitungan berat (bisa ratusan ribu kemungkinan). Kalau dihitung
+        // langsung di Update/coroutine, game MEMBEKU selama beberapa saat. Solusinya: kerjakan di
+        // THREAD terpisah (Task.Run), sementara coroutine hanya menunggu tiap frame sampai selesai.
+        // ATURAN EMAS: thread terpisah BOLEH menghitung (kode Core murni C#), tapi TIDAK BOLEH
+        // menyentuh objek Unity (GameObject, Transform, dst) karena Unity hanya aman diakses dari
+        // thread utama. Itu sebabnya AI bekerja pada salinan data (Board.Clone) dan bukan objek Unity.
         IEnumerator AiTurn()
         {
             Busy = true;
             AiThinking = true;
             int id = matchId;
-            var snapshot = Board.Clone();
+            var snapshot = Board.Clone();    // salinan papan: AI berpikir di salinan, bukan di papan asli
             var ai = Ai.For(AiDifficulty, null, rules.TurnCap > 0 ? new Rules { TurnCap = rules.TurnCap, AutoPancasona = true } : null);
-            var task = Task.Run(() => ai.ChooseTurn(snapshot));
+            var task = Task.Run(() => ai.ChooseTurn(snapshot));     // mulai berpikir di thread lain
             float started = Time.time;
+            // Tunggu per frame sampai AI selesai DAN jeda minimum lewat (agar terasa seperti berpikir).
+            // "yield return null" = lanjutkan di frame berikutnya, jadi game tetap mulus.
             while (!task.IsCompleted || Time.time - started < MinAiThinkSeconds) yield return null;
             AiThinking = false;
+            // Pemain bisa menekan "ulang" saat AI berpikir. matchId yang berbeda berarti hasil ini
+            // milik match lama dan harus dibuang.
             if (id != matchId) yield break; // the match was reset while the AI was thinking
 
             if (task.IsFaulted || task.Result == null || task.Result.Move == null)
@@ -859,6 +914,10 @@ namespace Pamor
             EnterState(paused ? GameState.Paused : GameState.Playing);
         }
 
+        // Satu pintu untuk pindah layar. Time.timeScale adalah "kecepatan waktu" global Unity:
+        // 1 = normal, 0 = berhenti total (semua animasi berbasis Time.deltaTime ikut berhenti).
+        // Itulah cara jeda dibuat. Animasi UI yang harus tetap jalan saat jeda memakai
+        // Time.unscaledDeltaTime (lihat parameter "unscaled" di Ease.Tween).
         void EnterState(GameState next)
         {
             State = next;
